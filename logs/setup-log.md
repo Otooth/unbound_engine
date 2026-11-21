@@ -905,3 +905,27 @@ Git 履歴（`936987e`〜`cb72aa6`）は残しており、作業ツリーだけ�
 | 3回とも壊れた応答を模擬 | 元のエラー文を含む RuntimeError | 同一の `Unterminated string … (char 21)` を再現 ✅ |
 | 監査だけ3回壊れる状況で `create_plan` | プランは返る | `check.audit_error` 付きで成功 ✅ |
 | API 再起動後、失敗ジョブの入力で実 Qwen 計画 | 成功 | PID 1993493、計画成功 ✅ |
+
+## 2026-11-22 続き生成の計画段階 Ollama CUDA error 対策
+
+- 症状: 続きジョブ2件（03:42, 03:45 JST、ユーザー削除済み）が計画段階で
+  `HTTP 500 … CUDA error: an internal operation failed` で失敗。
+- 原因: Ollama のログで、モデル読み込み直後の prefill 中に
+  `ggml_cuda_mul_mat_cublas_impl` で異常終了していた。CUDA 空きは約 112GB、
+  ComfyUI はアイドルだった。GB10 (sm_121) の MoE モデルで、特定のプロンプト
+  形状のときに cuBLAS が落ちる既知の不具合（llama.cpp #28377）。
+  プロンプト依存なので、同じ依頼は何度やっても落ちる。
+- 対策: Qwen 呼び出しへ `options.num_batch=256` を付け、llama-server を
+  `-b 256 -ub 256` で起動させる（環境変数 `OLLAMA_NUM_BATCH` で変更可）。
+  HTTP 500 の CUDA エラーも既存の3回再試行に含める。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `journalctl -u ollama` | 失敗位置の特定 | 2回とも prefill の cuBLAS GEMM で abort ✅ |
+| `num_batch:256` 付きで `/api/generate` | ランナー引数が変わる | `-b 256 -ub 256` で起動 ✅ |
+| 模擬 CUDA 500 → 実 Qwen で `create_plan`（続き・Wan14 親） | 再試行で成功 | 11.7秒で成功、CUDA error 0件 ✅ |
+| API 再起動 | 127.0.0.1:8001 | 起動・待受確認 ✅ |
+
+未確認: 失敗した2件の依頼文は削除済みで、元のプロンプトそのものでの再現・回避確認はしていない。

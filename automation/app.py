@@ -368,6 +368,9 @@ def unload_ollama() -> None:
 
 MAX_PLAN_STEPS = 12
 OLLAMA_STRUCTURED_ATTEMPTS = 3
+# GB10 cuBLAS aborts MoE prefill for some prompt shapes at larger ubatches
+# (llama.cpp #28377); 256 avoids every reported case.
+OLLAMA_NUM_BATCH = int(os.environ.get("OLLAMA_NUM_BATCH", "256"))
 STEP_SPLIT_PATTERN = re.compile(
     r"[。．！？!?\n]+|→|->|⇒"
     r"|[、,]?\s*(?:その後|そのあと|それから|そして|次に|続いて|最後に)[、,]?"
@@ -397,11 +400,18 @@ def ollama_structured(
             "options": {
                 "temperature": temperature + 0.15 * attempt,
                 "num_predict": min(num_predict * 2**attempt, 4096),
+                "num_batch": OLLAMA_NUM_BATCH,
             },
         }
-        response = request_json(
-            f"{OLLAMA_URL}/api/generate", payload, timeout=1800
-        )
+        try:
+            response = request_json(
+                f"{OLLAMA_URL}/api/generate", payload, timeout=1800
+            )
+        except RuntimeError as error:
+            if "CUDA error" not in str(error):
+                raise
+            last_error = str(error)
+            continue
         raw = response.get("response")
         if not isinstance(raw, str):
             last_error = "Ollama response did not contain a response string"
