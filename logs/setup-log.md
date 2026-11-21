@@ -883,3 +883,25 @@ Git 履歴（`936987e`〜`cb72aa6`）は残しており、作業ツリーだけ�
 | `python3 -m py_compile automation/app.py` | 構文エラーなし | `COMPILE_OK` ✅ |
 | 品質優先 API (PID 1228186) を停止し `scripts/start-api.sh` | 127.0.0.1:8001 で旧API | PID 1233113。`/health` は `service`/`ollama`/`comfyui` のみ（`ltx` なし）。UI 200 ✅ |
 | ComfyUI キュー | 空 | `queue_running`/`queue_pending` とも空 ✅ |
+
+## 2026-11-22 続き生成の計画段階 JSONDecodeError 対策
+
+- 症状: 続きジョブ `a93ff964-…`（Wan 14B、親 `b4b7fbe1-…`）が計画段階で
+  `JSONDecodeError: Unterminated string starting at: line 3 column 5 (char 21)` で失敗。
+- 原因: プラン監査（`plan_problems`、`num_predict=384`）の出力 `{"missing": ["…` の
+  1要素目が上限まで伸び、閉じていない JSON のまま返った。Qwen の出力ゆらぎで
+  時々起き、同じ入力の再実行3回ではすべて正常だった。
+- 対策: `ollama_structured` で `done_reason == "length"` と不正 JSON を検出し、
+  `num_predict` を倍増・温度を少し上げて最大3回再試行。`missing` に
+  `maxItems` を設定。監査が3回とも壊れた場合は、検証済みのプランで続行し
+  `check.audit_error` に記録する（ジョブ全体は失敗させない）。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 失敗ジョブと同じ入力で `create_plan` を実 Qwen で3回 | 再現確認 | 3回とも `done_reason=stop`、成功（非決定的な失敗） |
+| 打ち切り→不正JSON→正常 を模擬 | 3回目で成功 | `num_predict` 384→768→1536 で再試行し成功 ✅ |
+| 3回とも壊れた応答を模擬 | 元のエラー文を含む RuntimeError | 同一の `Unterminated string … (char 21)` を再現 ✅ |
+| 監査だけ3回壊れる状況で `create_plan` | プランは返る | `check.audit_error` 付きで成功 ✅ |
+| API 再起動後、失敗ジョブの入力で実 Qwen 計画 | 成功 | PID 1993493、計画成功 ✅ |

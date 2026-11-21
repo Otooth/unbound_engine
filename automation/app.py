@@ -367,6 +367,7 @@ def unload_ollama() -> None:
 
 
 MAX_PLAN_STEPS = 12
+OLLAMA_STRUCTURED_ATTEMPTS = 3
 STEP_SPLIT_PATTERN = re.compile(
     r"[。．！？!?\n]+|→|->|⇒"
     r"|[、,]?\s*(?:その後|そのあと|それから|そして|次に|続いて|最後に)[、,]?"
@@ -383,26 +384,45 @@ def ollama_structured(
     temperature: float,
     num_predict: int,
 ) -> dict[str, Any]:
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": system,
-        "prompt": prompt,
-        "format": schema,
-        "stream": False,
-        "think": False,
-        "keep_alive": "5m",
-        "options": {"temperature": temperature, "num_predict": num_predict},
-    }
-    response = request_json(
-        f"{OLLAMA_URL}/api/generate", payload, timeout=1800
+    last_error = ""
+    for attempt in range(OLLAMA_STRUCTURED_ATTEMPTS):
+        payload = {
+            "model": OLLAMA_MODEL,
+            "system": system,
+            "prompt": prompt,
+            "format": schema,
+            "stream": False,
+            "think": False,
+            "keep_alive": "5m",
+            "options": {
+                "temperature": temperature + 0.15 * attempt,
+                "num_predict": min(num_predict * 2**attempt, 4096),
+            },
+        }
+        response = request_json(
+            f"{OLLAMA_URL}/api/generate", payload, timeout=1800
+        )
+        raw = response.get("response")
+        if not isinstance(raw, str):
+            last_error = "Ollama response did not contain a response string"
+            continue
+        if response.get("done_reason") == "length":
+            last_error = (
+                f"Ollama output hit the {payload['options']['num_predict']}"
+                "-token limit before the JSON was complete"
+            )
+            continue
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as error:
+            last_error = f"Ollama returned malformed JSON: {error}"
+            continue
+        if isinstance(result, dict):
+            return result
+        last_error = "Ollama returned a non-object response"
+    raise RuntimeError(
+        f"{last_error} (after {OLLAMA_STRUCTURED_ATTEMPTS} attempts)"
     )
-    raw = response.get("response")
-    if not isinstance(raw, str):
-        raise RuntimeError("Ollama response did not contain a response string")
-    result = json.loads(raw)
-    if not isinstance(result, dict):
-        raise RuntimeError("Ollama returned a non-object response")
-    return result
 
 
 def clean_steps(raw_steps: Any) -> list[str]:
@@ -603,7 +623,11 @@ def plan_problems(
             "physical_consistency_ok",
         ],
         "properties": {
-            "missing": {"type": "array", "items": {"type": "string"}},
+            "missing": {
+                "type": "array",
+                "maxItems": MAX_PLAN_STEPS,
+                "items": {"type": "string"},
+            },
             "order_ok": {"type": "boolean"},
             "scene_shows_initial_state": {"type": "boolean"},
             "state_sequence_ok": {"type": "boolean"},
@@ -760,9 +784,13 @@ def create_plan(
         )
         if fixed_count and len(steps) != len(clauses):
             raise RuntimeError("Ollama changed the number of requested steps")
-        check = plan_problems(
-            concept, scene, orientation, steps, result_states
-        )
+        try:
+            check = plan_problems(
+                concept, scene, orientation, steps, result_states
+            )
+        except RuntimeError as error:
+            check = {"audit_error": str(error)}
+            break
         missing = [
             item for item in check.get("missing", []) if isinstance(item, str)
         ]
