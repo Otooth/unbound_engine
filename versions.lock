@@ -1,5 +1,5 @@
 format = 1
-generated_at = "2026-11-21"
+generated_at = "2026-11-19"
 
 [playbook]
 repository = "https://github.com/NVIDIA/dgx-spark-playbooks.git"
@@ -58,37 +58,6 @@ revision = "ee6f4a40737a995bf5818954cfce6d59443b0f04"
 repository = "Lightricks/LTX-2.5"
 revision = "49b093a39c19169a8a81721dcc541e07e945232f"
 status = "downloaded_and_verified"
-native_quality_assets_status = "downloaded_and_verified"
-native_quality_new_bytes = 119531295248
-
-[models.ltx_2_5_detailing_lora]
-repository = "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler"
-revision = "59f26f1e0c11af42f1affa924b4ef231e9e98b2a"
-status = "downloaded_and_verified"
-
-[ltx_pipelines]
-repository = "https://github.com/Lightricks/LTX-2.git"
-version = "1.6.2"
-commit = "daa6b16fc7f0f1628f2c9e36a303e3312b333cc6"
-image = "unbound-ltx-worker:1.6.2"
-image_digest = "sha256:bd25de6c8e3ad890f46a3cecfcabf55211cd43b3a2dbfe1778aeca144114592b"
-base_image = "python:3.12-slim-bookworm"
-base_manifest_digest = "sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df"
-base_arm64_digest = "sha256:df540bfd30bd380e89a349611ce42aa67bcb542d58c047706616eb6ba2f86a1b"
-uv_version = "0.9.18"
-uv_lock_sha256 = "6596b554482369306863a4baf03b8f8bb1138d47fa1b65fac26bfe897bb534ba"
-network_bind = "127.0.0.1:8191"
-offload_mode = "cpu"
-runtime_c_compiler = "gcc 12.2.0"
-torch_version = "2.13.0+cu132"
-natten_version = "0.21.7"
-profiles = ["ti2_hq", "dfr", "ti2_chunked"]
-ti2_hq_module = "ltx_pipelines.ti2vid_two_stages_hq"
-dfr_module = "ltx_pipelines.dfr_pipeline"
-ti2_chunked_module = "ltx_pipelines.ti2vid_two_stages"
-chunk_pixel_frames = 97
-chunk_carry_frames = 25
-chunk_blend_frames = 25
 
 [models.wan_animate_2]
 repository = "Comfy-Org/Wan-Animate-2"
@@ -106,55 +75,12 @@ python_multipart = "0.0.34"
 starlette = "1.10.0"
 
 [automation.api_workflows.wan_2_2_i2v_14b]
-source = "workflows/compare_wan14_4step_i2v.api.json"
+source = "workflows/compare_wan14_4step_i2v.json"
 sha256 = "b41e065939f084e8849b6e2596a303104900e6d20362e887d837f9287e7718d8"
-
-[automation.api_workflows.wan_2_2_i2v_14b.profiles.quality]
-sha256 = "b41e065939f084e8849b6e2596a303104900e6d20362e887d837f9287e7718d8"
-switch_node = "129:131"
-switch_value = false
-steps = 20
-cfg = 3.5
-lightx2v_lora = false
-
-[automation.api_workflows.wan_2_2_i2v_14b.profiles.fast]
-sha256 = "b41e065939f084e8849b6e2596a303104900e6d20362e887d837f9287e7718d8"
-switch_node = "129:131"
-switch_value = true
-steps = 4
-cfg = 1.0
-lightx2v_lora = true
-
-[automation.api_workflows.wan_2_2_ti2v_5b]
-source = "workflows/video_wan2_2_5B_ti2v.api.json"
-sha256 = "60886afc3ed4d5a83031585988f2cacb18a259a9120ec7cac388068ad944d629"
 
 [automation.api_workflows.ltx_2_5_i2v]
-source = "workflows/compare_ltx2_5_i2v.api.json"
+source = "workflows/compare_ltx2_5_i2v.json"
 sha256 = "7ccea074d8897f03147e677d90c2bf4c9c4c30b8d42e546b38d3efc5bc01f8db"
-
-[benchmarks.ltx_backends]
-definition = "benchmarks/local-video-eval-12.json"
-report = "benchmarks/ltx-backend-comparison.json"
-seeds = [10, 314159]
-status = "all_three_profiles_passed_quality_gates"
-
-[benchmarks.quality_gates]
-calibration = "benchmarks/quality-gate-calibration.json"
-generated_at = "2026-11-20T15:05:38.147090+00:00"
-minimum_black_interval_seconds = 0.5
-minimum_freeze_interval_seconds = 2.0
-status = "moving_passed_frozen_and_black_rejected"
-
-[acceptance.offline]
-method = "docker_network_none_with_unix_socket_relays"
-management_network_preserved = true
-report = "logs/offline-acceptance-20261121T020905Z.json"
-status = "passed"
-wan_job = "44525b23-3da5-4d84-ae30-8f9f65e70c51"
-ltx_dfr_job = "df419b7f-f29f-40b2-91b8-6e06c511b50c"
-cancelled_job = "a951dd5f-f763-4eb9-8b3b-468a83472189"
-peak_host_memory_used_bytes = 58684743680
 
 [automation.api_workflows.wan_animate_2]
 source = "workflows/video_wan_animate2_distilled.json"

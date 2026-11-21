@@ -9,11 +9,8 @@ destination="logs/comfyui-${timestamp}.log"
 
 {
     echo "Collected at: $timestamp"
-    docker compose --profile ltx ps
+    docker compose ps
     docker compose logs --no-color comfyui
-    if [[ -n "$(docker compose --profile ltx ps -q ltx)" ]]; then
-        docker compose --profile ltx logs --no-color ltx
-    fi
 } > "$destination"
 
 echo "$destination"

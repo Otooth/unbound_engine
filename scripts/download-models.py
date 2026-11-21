@@ -6,16 +6,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-import time
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 # Xet/CAS reconstruction has proved unreliable for multi-GB files on this host.
 # Use the Hub's resumable HTTPS path instead.
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
-from huggingface_hub import get_token, hf_hub_url
+from huggingface_hub import hf_hub_download
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,10 +23,6 @@ WAN_REPO = "Comfy-Org/Wan_2.2_ComfyUI_Repackaged"
 WAN_REVISION = "ee6f4a40737a995bf5818954cfce6d59443b0f04"
 LTX_REPO = "Lightricks/LTX-2.5"
 LTX_REVISION = "49b093a39c19169a8a81721dcc541e07e945232f"
-LTX_DETAIL_REPO = (
-    "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler"
-)
-LTX_DETAIL_REVISION = "59f26f1e0c11af42f1affa924b4ef231e9e98b2a"
 ANIMATE_REPO = "Comfy-Org/Wan-Animate-2"
 ANIMATE_REVISION = "e7181fe1896b7f2ce34120d1a3663413548240d7"
 
@@ -144,74 +137,6 @@ PROFILES = {
             "eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8",
         ),
     ),
-    "ltx25-hq": (
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
-            "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
-            42_018_190_584,
-            "792a2bad501ca03262c0bc2ce7a2949e85b142ce18e30894aad5bc849c8e7584",
-        ),
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
-            "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
-            26_263_858_182,
-            "ef7243612fdae7a75cb4d5cee9433e81380675fb6c213bd98ae74a9cd16561d1",
-        ),
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
-            "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
-            8_899_889_568,
-            "86370bbf79a9eb4edaa158907e2b48a5188fe4c5dc8ce30c7eb8f2f131a9bbf5",
-        ),
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "model_patches/ltx-2.5-duration-head-bf16.safetensors",
-            "model_patches/ltx-2.5-duration-head-bf16.safetensors",
-            3_843_690,
-            "2ec71e4206ed365d015f00c05a48caccfb0ee862986809d06ae376c09f5d9190",
-        ),
-    ),
-    "ltx25-dfr": (
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
-            "diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
-            42_018_190_584,
-            "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
-        ),
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
-            "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
-            26_263_858_182,
-            "ef7243612fdae7a75cb4d5cee9433e81380675fb6c213bd98ae74a9cd16561d1",
-        ),
-        (
-            LTX_REPO,
-            LTX_REVISION,
-            "model_patches/ltx-2.5-duration-head-bf16.safetensors",
-            "model_patches/ltx-2.5-duration-head-bf16.safetensors",
-            3_843_690,
-            "2ec71e4206ed365d015f00c05a48caccfb0ee862986809d06ae376c09f5d9190",
-        ),
-        (
-            LTX_DETAIL_REPO,
-            LTX_DETAIL_REVISION,
-            "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
-            "loras/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
-            327_322_640,
-            "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
-        ),
-    ),
     "animate2": (
         (
             ANIMATE_REPO,
@@ -240,11 +165,6 @@ PROFILES = {
     ),
 }
 
-PROFILE_DEPENDENCIES = {
-    "ltx25-hq": ("ltx25",),
-    "ltx25-dfr": ("ltx25",),
-}
-
 # Type shape for one asset:
 # (repository, revision, source path, local path, byte size, SHA256)
 Asset = tuple[str, str, str, str, int, str]
@@ -271,124 +191,6 @@ def verify(path: Path, expected_size: int, expected_sha256: str) -> None:
         )
 
 
-def download_with_retries(
-    *,
-    repo_id: str,
-    filename: str,
-    revision: str,
-    local_dir: Path,
-    expected_size: int,
-    expected_sha256: str,
-) -> Path:
-    """Append authenticated byte ranges without ever truncating valid progress."""
-
-    maximum_stalled_attempts = int(
-        os.environ.get("HF_DOWNLOAD_STALLED_ATTEMPTS", "100")
-    )
-    if maximum_stalled_attempts < 1:
-        raise ValueError("HF_DOWNLOAD_STALLED_ATTEMPTS must be at least 1")
-    timeout = float(os.environ.get("HF_DOWNLOAD_TIMEOUT", "60"))
-    if timeout <= 0:
-        raise ValueError("HF_DOWNLOAD_TIMEOUT must be positive")
-
-    partial = local_dir / ".unbound" / f"{filename}.incomplete"
-    partial.parent.mkdir(parents=True, exist_ok=True)
-    legacy_directory = (
-        local_dir
-        / ".cache"
-        / "huggingface"
-        / "download"
-        / Path(filename).parent
-    )
-    if not partial.exists() and legacy_directory.is_dir():
-        legacy_candidates = list(
-            legacy_directory.glob(
-                f"*.{expected_sha256}.*.incomplete"
-            )
-        )
-        if legacy_candidates:
-            legacy = max(legacy_candidates, key=lambda path: path.stat().st_size)
-            os.replace(legacy, partial)
-            print(
-                f"Adopted {partial.stat().st_size} resumable bytes from "
-                "the Hub staging file.",
-                flush=True,
-            )
-
-    url = hf_hub_url(repo_id, filename, revision=revision)
-    token = get_token()
-    stalled_attempts = 0
-    while True:
-        resume_size = partial.stat().st_size if partial.exists() else 0
-        if resume_size == expected_size:
-            return partial
-        if resume_size > expected_size:
-            raise RuntimeError(
-                f"{partial}: partial file exceeds expected size: "
-                f"{resume_size} > {expected_size}"
-            )
-
-        headers = {
-            "Accept-Encoding": "identity",
-            "Range": f"bytes={resume_size}-",
-            "User-Agent": "unbound-engine-model-downloader/1",
-        }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        request = Request(url, headers=headers)
-        before = resume_size
-        failure: Exception = RuntimeError(
-            "connection ended before the expected file size"
-        )
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                status = response.status
-                content_range = response.headers.get("Content-Range", "")
-                if status != 206 or not content_range.startswith(
-                    f"bytes {resume_size}-"
-                ):
-                    raise RuntimeError(
-                        "server did not honor the exact resume range: "
-                        f"status={status}, Content-Range={content_range!r}"
-                    )
-                with partial.open("ab") as output:
-                    while chunk := response.read(16 * 1024 * 1024):
-                        output.write(chunk)
-                        resume_size += len(chunk)
-                        if resume_size > expected_size:
-                            raise RuntimeError(
-                                "server returned more bytes than expected"
-                            )
-        except HTTPError as error:
-            if error.code in {401, 403, 404}:
-                raise RuntimeError(
-                    f"non-retryable Hub HTTP {error.code} for "
-                    f"{repo_id}:{filename}"
-                ) from error
-            failure: Exception = error
-        except Exception as error:
-            failure = error
-
-        current_size = partial.stat().st_size if partial.exists() else 0
-        if current_size == expected_size:
-            return partial
-        if current_size > before:
-            stalled_attempts = 0
-            delay = 1
-        else:
-            stalled_attempts += 1
-            if stalled_attempts >= maximum_stalled_attempts:
-                raise failure
-            delay = min(30, stalled_attempts * 5)
-        print(
-            f"Transfer interrupted at {current_size}/{expected_size} bytes: "
-            f"{type(failure).__name__}: {failure}",
-            flush=True,
-        )
-        print(f"Resuming in {delay} seconds...", flush=True)
-        time.sleep(delay)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -397,41 +199,16 @@ def main() -> None:
         choices=tuple(PROFILES),
         default=["wan5b"],
     )
-    parser.add_argument(
-        "--plan",
-        action="store_true",
-        help="List pinned assets and missing bytes without downloading",
-    )
     args = parser.parse_args()
 
     assets: list[Asset] = []
     seen_destinations: set[str] = set()
     for profile in args.profiles:
-        expanded = (*PROFILE_DEPENDENCIES.get(profile, ()), profile)
-        for expanded_profile in expanded:
-            for asset in PROFILES[expanded_profile]:
-                destination_name = asset[3]
-                if destination_name not in seen_destinations:
-                    assets.append(asset)
-                    seen_destinations.add(destination_name)
-
-    if args.plan:
-        missing_bytes = 0
-        for asset in assets:
-            destination = MODELS_ROOT / asset[3]
-            present = (
-                destination.is_file()
-                and destination.stat().st_size == asset[4]
-            )
-            if not present:
-                missing_bytes += asset[4]
-            print(
-                f"{'present' if present else 'missing'} "
-                f"{asset[4]:>14} {asset[3]}"
-            )
-        print(f"Missing total: {missing_bytes} bytes")
-        print(f"Missing total: {missing_bytes / 1024**3:.2f} GiB")
-        return
+        for asset in PROFILES[profile]:
+            destination_name = asset[3]
+            if destination_name not in seen_destinations:
+                assets.append(asset)
+                seen_destinations.add(destination_name)
 
     for (
         repo_id,
@@ -452,13 +229,13 @@ def main() -> None:
 
         print(f"Downloading {repo_id}@{revision}:{source_name}")
         repository_staging = STAGING_ROOT / repo_id.replace("/", "--")
-        downloaded = download_with_retries(
-            repo_id=repo_id,
-            filename=source_name,
-            revision=revision,
-            local_dir=repository_staging,
-            expected_size=expected_size,
-            expected_sha256=expected_sha256,
+        downloaded = Path(
+            hf_hub_download(
+                repo_id=repo_id,
+                filename=source_name,
+                revision=revision,
+                local_dir=repository_staging,
+            )
         )
         verify(downloaded, expected_size, expected_sha256)
         os.replace(downloaded, destination)

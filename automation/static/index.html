@@ -287,11 +287,10 @@
             </div>
             <div class="hint" id="qualityHint">標準解像度と通常圧縮で生成します。</div>
           </div>
-          <div class="field" id="profileField" style="display:none">
-            <label for="generationProfile">推論経路</label>
-            <select id="generationProfile"></select>
-            <div class="hint" id="profileHint"></div>
-          </div>
+          <label class="check" id="precisionCheck">
+            <input type="checkbox" id="precisionMode">
+            <span><strong>動作精度優先（Wan 14B）：</strong>4ステップ高速LoRAを使わず、公式標準の20ステップで生成します。指示への追従は上がりますが、生成時間は数倍になります。</span>
+          </label>
           <div class="field">
             <label for="seed">Seed（同じ映像を再現するときだけ指定）</label>
             <input type="number" id="seed" min="0" placeholder="空欄なら毎回ランダム">
@@ -322,7 +321,6 @@
             </div>
             <div class="bar"><div id="progressBar"></div></div>
             <div class="events" id="events"></div>
-            <div class="hint" id="qualitySummary"></div>
             <button class="cancel-button" id="cancelButton" type="button">生成をキャンセル</button>
             <button class="continue-button" id="continueJobButton" type="button">この動画の続きを作る</button>
             <button class="cancel-button" id="deleteJobButton" type="button">この履歴と動画を削除</button>
@@ -343,13 +341,11 @@
     const statusLabels = {
       queued: "順番待ち", planning: "プロンプトを設計中", motion: "動作の下書きを生成中",
       generating: "動画を生成中", continuing: "次の区間へ接続中",
-      analyzing: "動きと品質を解析中", validating: "品質検査中",
-      quality_retry: "品質条件を補強して再生成中", plan_rejected: "工程監査で停止",
       finishing: "動画を仕上げ中", extending: "元動画と続きを連結中",
       succeeded: "完成", failed: "失敗",
       cancelled: "キャンセル済み"
     };
-    const progress = { queued: 8, planning: 18, motion: 42, generating: 65, continuing: 72, analyzing: 78, validating: 86, quality_retry: 55, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
+    const progress = { queued: 8, planning: 18, motion: 42, generating: 72, continuing: 78, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
     let activeJob = null;
     let currentJob = null;
     let continuationSource = null;
@@ -543,19 +539,6 @@
       $("events").innerHTML = events.map((event) =>
         `<div class="event">${escapeHtml(statusLabels[event.stage] || event.message)}</div>`
       ).join("");
-      const quality = job.quality;
-      if (quality) {
-        const hardIssues = (quality.issues || []).filter((issue) => issue.hard);
-        const attempts = Math.max(
-          0,
-          ...(quality.attempts || []).map((item) => Number(item.attempt) || 0)
-        );
-        $("qualitySummary").textContent = quality.passed
-          ? `品質検査：合格${attempts > 1 ? "（1回再生成）" : ""}`
-          : `品質不合格：${hardIssues.map((issue) => issue.code).join("、") || "判定不能"}`;
-      } else {
-        $("qualitySummary").textContent = "";
-      }
       $("error").textContent = job.status === "failed" ? job.error || "" : "";
       const video = $("resultVideo");
       if (job.status === "succeeded" && job.output_url) {
@@ -610,7 +593,7 @@
               : ""}
           </div>
           <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60))}</div>
-          <div class="meta">${job.engine === "ltx25" ? "LTX-2.5" : job.engine === "wan14" ? "Wan 14B" : job.engine === "animate2" ? "Wan Animate 2" : "Wan 5B"}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 高解像度" : ""}${job.generation_profile ? ` · ${escapeHtml(job.generation_profile)}` : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
+          <div class="meta">${job.engine === "ltx25" ? "LTX-2.5" : job.engine === "wan14" ? "Wan 14B" : job.engine === "animate2" ? "Wan Animate 2" : "Wan 5B"}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 画質優先" : ""}${job.precision_mode ? " · 精度優先" : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
         </div>`).join("") || '<div class="hint">まだ履歴はありません。</div>';
       document.querySelectorAll("[data-job]").forEach((card) => {
         card.addEventListener("click", () => watchJob(card.dataset.job));
@@ -675,9 +658,7 @@
         "元動画の直後に起こる新しい動作だけを入力してください。以前の動作は書き直さないでください。";
       $("shots").value = String(Math.max(1, Math.min(3, Number(job.shots) || 1)));
       setQualityMode(Boolean(job.quality_mode));
-      $("generationProfile").value =
-        job.generation_profile || (job.engine === "wan14" ? "quality" : "comfy");
-      updateProfileHint();
+      $("precisionMode").checked = Boolean(job.precision_mode);
       $("submitButton").textContent = "続きの動画を生成";
       $("jobForm").scrollIntoView({ behavior: "smooth", block: "start" });
       $("concept").focus({ preventScroll: true });
@@ -694,43 +675,13 @@
       $("engine").dispatchEvent(new Event("change"));
     }
 
-    function updateProfileHint() {
-      const profile = $("generationProfile").value;
-      const hints = {
-        quality: "既定。公式標準20ステップ、CFG 3.5、LightX2V LoRAなし。指示追従を優先します。",
-        fast: "LightX2V 4ステップ。高速ですが、複雑な動作と時間的一貫性は低下します。",
-        comfy: "既存ComfyUI INT8 distilled経路。高速基準として残します。",
-        ti2_hq: "公式TI2Vid Two-Stage HQ。guided BF16二段階経路です。",
-        dfr: "公式DFR production-quality経路。ディテール再描画を行います。",
-        ti2_chunked: "長尺用。97フレーム窓と25フレームcarryで時間状態を引き継ぎます。"
-      };
-      $("profileHint").textContent = hints[profile] || "";
-      const ltx = $("engine").value === "ltx25";
-      const animate = $("engine").value === "animate2";
-      $("shots").disabled = animate || (ltx && profile !== "ti2_chunked");
-      if ($("shots").disabled) $("shots").value = "1";
-    }
-
     $("engine").addEventListener("change", () => {
       const ltx = $("engine").value === "ltx25";
       const animate = $("engine").value === "animate2";
-      const wan14 = $("engine").value === "wan14";
       const imageToVideo = ["wan14", "ltx25", "animate2"].includes($("engine").value);
       $("ltxCheck").classList.toggle("show", ltx);
-      $("profileField").style.display = wan14 || ltx ? "block" : "none";
-      if (wan14) {
-        $("generationProfile").innerHTML =
-          '<option value="quality">品質優先 — 20ステップ（既定）</option>' +
-          '<option value="fast">速度優先 — 4ステップLoRA</option>';
-      } else if (ltx) {
-        $("generationProfile").innerHTML =
-          '<option value="comfy">Comfy INT8 — 現行基準</option>' +
-          '<option value="dfr">公式DFR — production quality候補</option>' +
-          '<option value="ti2_hq">公式TI2Vid HQ — guided二段階</option>' +
-          '<option value="ti2_chunked">公式chunked — 10/15秒</option>';
-      } else {
-        $("generationProfile").innerHTML = '<option value="comfy">ComfyUI</option>';
-      }
+      $("precisionCheck").classList.toggle("show", $("engine").value === "wan14");
+      if ($("engine").value !== "wan14") $("precisionMode").checked = false;
       $("imageField").style.display =
         imageToVideo && !continuationSource ? "block" : "none";
       $("animateFields").style.display = animate ? "block" : "none";
@@ -739,12 +690,12 @@
         ? "正面・側面・背面を登録できますが、生成に使うのは下で選ぶ1面だけです。選択面と同じ向きを保つ動作を使用してください。"
         : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
       $("shots").options[0].textContent = animate ? "約3秒" : "約5秒";
-      updateProfileHint();
+      $("shots").disabled = ltx || animate;
+      if (ltx || animate) $("shots").value = "1";
       updateCharacterPreview().catch((error) => {
         $("error").textContent = error.message;
       });
     });
-    $("generationProfile").addEventListener("change", updateProfileHint);
 
     $("characterView").addEventListener("change", () => {
       $("cropAdjustField").style.display =
@@ -840,9 +791,7 @@
           driving_video: drivingVideo,
           enhance_prompt: $("enhancePrompt").checked,
           quality_mode: qualityMode,
-          generation_profile: $("generationProfile").value || "comfy",
-          precision_mode: $("engine").value === "wan14"
-            && $("generationProfile").value === "quality",
+          precision_mode: $("engine").value === "wan14" && $("precisionMode").checked,
           continuation_of: continuation ? continuation.id : null,
           ltx_license_acknowledged: $("ltxAck").checked
         };

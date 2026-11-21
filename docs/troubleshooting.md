@@ -52,15 +52,11 @@ HTTPS path. Run the same profile again:
 
 ```bash
 hf-env/bin/python scripts/download-models.py ltx25
-hf-env/bin/python scripts/download-models.py ltx25-hq
-hf-env/bin/python scripts/download-models.py ltx25-dfr
 ```
 
-The downloader resumes with authenticated HTTP Range requests. A connection or
-DNS failure keeps all verified partial bytes; if a server ignores Range, the
-script validates the returned response before replacing anything. Every
-completed file is checked against its pinned byte size and SHA256. Do not move
-a partial file into `models/` manually.
+Existing partial data is resumed and every completed file is checked against
+its pinned byte size and SHA256. Do not move a partial file into `models/`
+manually.
 
 ## ComfyUI reports `Value not in list`
 
@@ -79,32 +75,6 @@ subgraph width and height inputs. Those links override the displayed subgraph
 widget values. The comparison workflow sets the selector to square, 0.4 MP,
 multiple 32, producing 640×640.
 
-## Native LTX profile is unavailable
-
-Check the worker and its fixed assets:
-
-```bash
-curl http://127.0.0.1:8191/health
-docker compose --profile ltx logs ltx
-```
-
-`profiles_ready` reports `ti2_hq`, `dfr`, and `ti2_chunked` separately. Re-run
-the matching verification profile if one is false:
-
-```bash
-hf-env/bin/python scripts/download-models.py ltx25-hq
-hf-env/bin/python scripts/download-models.py ltx25-dfr
-```
-
-DFR's detailing LoRA is a separately gated Hugging Face repository. A 403
-after authenticating means its **Agree and Access** step has not been accepted
-for the same account. The fixed worker also needs `gcc` and `libc6-dev` because
-PyTorch/Triton compiles a small CUDA launcher on first use; rebuild
-`unbound-ltx-worker:1.6.2` if that compiler is missing.
-
-DFR in `ltx-pipelines` 1.6.2 does not accept a negative prompt. The automation
-passes corrections through its positive constraints for that profile.
-
 ## UI workflow fails when posted to `/prompt`
 
 ComfyUI UI JSON and API JSON are different formats. Use the checked-in
@@ -122,15 +92,12 @@ curl http://127.0.0.1:11434/api/generate \
 curl -X POST http://127.0.0.1:8188/free \
   -H 'Content-Type: application/json' \
   -d '{"unload_models":true,"free_memory":true}'
-curl -X POST http://127.0.0.1:8191/release \
-  -H 'Content-Type: application/json' -d '{}'
 free -g
 ```
 
-The automation service performs all three unload operations between planning,
-ComfyUI, and native LTX generation. A stopped Ollama process is not required;
-`/api/ps` should show no loaded model. `/health` on port 8191 should show no
-`active_job_id`.
+The automation service performs both unload operations between planning and
+video generation. A stopped Ollama process is not required; `/api/ps` should
+show no loaded model.
 
 The **quality priority** button uses higher generation resolution and lossless
 H.264 output. If it runs out of unified memory, wait for the current job to
@@ -161,27 +128,6 @@ The job becomes `cancelled`. Only the matching active job sends ComfyUI an
 interrupt; cancelling a waiting job does not stop a different running job.
 Partial output is not shown as a completed video.
 
-## A job says `quality_retry` or `品質不合格`
-
-The first high-confidence failure triggers exactly one corrective regeneration
-with a new seed. The correction includes the observed anatomy, orientation,
-identity, instruction, freeze, or boundary problem. If the second attempt also
-fails, the job ends as failed and neither attempt is exposed through
-`/outputs`.
-
-Inspect:
-
-```bash
-curl http://127.0.0.1:8001/jobs/JOB_ID
-curl http://127.0.0.1:8001/jobs/JOB_ID/events
-cat output/jobs/JOB_ID/quality-report.json
-```
-
-Do not bypass a front/back-fusion or identity failure by increasing resolution
-or lowering compression. Those settings do not improve model understanding.
-Use a clean start image matching the requested orientation, shorten the action,
-or use a driving video with Wan Animate 2.
-
 ## A history entry cannot be deleted
 
 `DELETE /jobs/JOB_ID` returns `409` while the job is queued or running. Cancel
@@ -210,23 +156,18 @@ wording must reach the video model unchanged.
 Open the job progress and read the `工程:` line. If an action is missing
 there, the instruction did not reach the video model; separate actions with
 `。`, `その後`, `→`, or `then` so each becomes its own fixed step. A
-`plan_rejected` event means the regenerated plan still failed the missing-step,
-order, state, orientation, or physical-consistency audit. The job now stops
-before loading a video model; it no longer continues with a warning. Rewrite
-the request so the initial state, visible action, and end state are explicit.
+`工程チェックで未解決の指摘があります` line means the audit still found a
+problem after one regeneration.
 
 If the steps are correct but the video is not, the limit is the model:
 
 - Wan 14B and LTX animate the start image and resist large changes to what
   is already in it. Prefer a start image that shows the state before the
   first action.
-- The 4-step LoRA reduces adherence for complex sequences. Wan 14B now uses
-  the 20-step `quality` profile by default; choose `fast` only when the
-  speed/quality trade-off is intentional.
-- Wan receives one start frame per segment, but the automation also carries a
-  terminal frame window, tail video, and structured direction/speed/pose
-  state into the next prompt. This reduces resets but cannot preserve the
-  model's hidden latent state.
+- The 4-step LoRA reduces adherence for complex sequences. Enable
+  **動作精度優先** (about five to seven times slower).
+- Segments share only the final frame. Keep each segment to one or two
+  steps by choosing a longer duration for longer sequences.
 - Wan Animate 2 with a recorded motion video remains the most precise option
   for choreography.
 
@@ -257,17 +198,13 @@ supported by the current node without risking front/back fusion.
 
 Older automation jobs generated independent five-second shots and concatenated
 them, so each boundary restarted the scene. Current Wan 5B and Wan 14B jobs
-store the exact end frame, a terminal frame sequence, a tail MP4, and Qwen
-Vision's structured direction/speed/pose state. Wan uses the exact end frame
-as its next model input; the rest constrains the prompt and boundary audit.
-The prompt planner also keeps subject, setting, lighting, and camera position
-continuous.
+extract the end frame of each segment and use it as the next segment's start
+image. The prompt planner also keeps subject, setting, lighting, and camera
+position continuous.
 
 This removes the hard visual reset, but long generative video can still drift
-gradually because Wan does not expose hidden temporal state. Native LTX's
-`ti2_chunked` profile instead uses official 97-frame windows, 25 carried
-frames, and 25 overlap-blended frames within one run. Wan Animate 2 remains a
-single-segment motion-transfer mode.
+gradually in identity or fine detail. LTX-2.5 and Wan Animate 2 remain
+single-segment modes in the current fixed workflows.
 
 ## A completed video needs more footage
 
@@ -281,13 +218,11 @@ Wan 14B precision mode are inherited automatically so resolution, frame rate,
 and codec remain compatible for lossless stream concatenation. A source cannot
 be deleted while its continuation is active.
 
-The continuation receives the complete saved terminal bundle: exact decoded
-final frame, sampled terminal frames, tail MP4, probe timing, and Qwen Vision's
-subject count, orientation, pose, motion direction/speed, held objects, and
-camera state. Wan's model input is still one image, not hidden temporal state,
-so motion speed and fine identity can drift. A boundary gate must pass before
-concatenation. Continue in shorter increments and describe only the immediate
-next action. The result can be extended repeatedly.
+The continuation receives the exact decoded final frame and the prior plan's
+last visible state, but not the model's hidden temporal state. Motion speed and
+fine identity can therefore drift at the boundary. Continue in shorter
+increments and describe only the immediate next action. The result can be
+extended repeatedly.
 
 If the endpoint returns `409`:
 
@@ -338,32 +273,6 @@ because one reference cannot define both sides reliably.
 Strongly non-human proportions, quadrupeds, intricate contact between
 characters, and precise hand choreography can therefore remain unstable even
 with clean references.
-
-## Integrated offline acceptance fails
-
-Use `scripts/test-service-offline-acceptance.sh` when this machine is managed
-from another computer. It keeps Ethernet/Wi-Fi and SSH available but recreates
-Automation, Qwen, ComfyUI, and native LTX with Docker `network none`; only
-shared Unix sockets connect their local APIs. The script refuses to start if a
-generation job is active and restores the normal services through an exit
-trap after either success or failure.
-
-After a failure, verify that restoration completed:
-
-```bash
-curl http://127.0.0.1:8001/health
-curl http://127.0.0.1:8188/system_stats
-curl http://127.0.0.1:8191/health
-curl http://127.0.0.1:11434/api/version
-```
-
-`scripts/test-offline-acceptance.sh` is the physical host-disconnection
-variant. It deliberately exits with status 2 while Hugging Face is reachable;
-use it only with local console access. Do not disconnect the sole management
-network merely to run acceptance.
-
-ComfyUI's smaller `scripts/test-offline.sh` disconnects and restores only its
-Docker network automatically.
 
 ## Output metadata
 

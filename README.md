@@ -8,14 +8,10 @@ ComfyUI is published only on `127.0.0.1:8188`.
 - DGX Spark / NVIDIA GB10 / 128 GB unified memory
 - ComfyUI 0.45.0
 - Wan 2.2 TI2V-5B FP16
-- Wan 2.2 I2V-14B FP8 scaled: 20-step quality profile by default;
-  LightX2V 4-step LoRA only in the explicit fast profile
+- Wan 2.2 I2V-14B FP8 scaled + LightX2V 4-step LoRA
 - Wan Animate 2 distilled 14B INT8 ConvRot
-- LTX-2.5 ComfyUI distilled INT8 baseline
-- Official LTX worker pinned to `ltx-pipelines` 1.6.2 with TI2Vid HQ, DFR,
-  and 97-frame/25-frame-carry/25-frame-blend chunked profiles
-- Fail-closed Qwen planning, post-generation quality gates, and one automatic
-  corrective retry
+- LTX-2.5 distilled Transformer/Text Encoder INT8 ConvRot
+- Official 1280×704, 121-frame, 24 fps workflow
 - Container build and source revisions pinned in `versions.lock`
 - ComfyUI-Manager configured with `network_mode = offline`
 - Hugging Face and Transformers offline environment variables enabled
@@ -24,14 +20,11 @@ ComfyUI is published only on `127.0.0.1:8188`.
 
 ```bash
 docker compose build
-docker compose --profile ltx build ltx
 scripts/start.sh
 ```
 
-`scripts/start.sh` starts the LTX worker automatically when its fixed image is
-present. ComfyUI listens on `127.0.0.1:8188`; the LTX worker listens on
-`127.0.0.1:8191`. For access from another machine, use an SSH tunnel; do not
-expose either service publicly.
+Open <http://127.0.0.1:8188/> locally. For access from another machine, use an
+SSH tunnel; do not expose port 8188 publicly.
 
 ```bash
 ssh -L 8188:127.0.0.1:8188 USER@DGX_SPARK
@@ -48,8 +41,6 @@ hf-env/bin/pip install huggingface_hub==2.4.0
 hf-env/bin/python scripts/download-models.py
 hf-env/bin/python scripts/download-models.py wan14
 hf-env/bin/python scripts/download-models.py ltx25
-hf-env/bin/python scripts/download-models.py ltx25-hq
-hf-env/bin/python scripts/download-models.py ltx25-dfr
 hf-env/bin/python scripts/download-models.py animate2
 ```
 
@@ -65,25 +56,19 @@ python3 scripts/test-generate.py
 The API workflow is `workflows/video_wan2_2_5B_ti2v.api.json`. Runtime and
 unified-memory measurements are written under `logs/generations/`.
 
-## Verified LTX-2.5 multi-backend comparison
+## Verified 14B / LTX-2.5 comparison
 
-`benchmarks/local-video-eval-12.json` defines the benign coverage suite.
-`benchmarks/ltx-backend-comparison.json` records the controlled comparison
-using the same image, prompt, 640×640 size, 81 frames, 16 fps, and seeds 10
-and 314159. All three routes passed anatomy, front/back fusion, orientation,
-identity, instruction, technical, and freeze/black-frame gates.
+The reproducible UI workflows are:
 
-Measured two-seed mean time and maximum peak host-memory use:
+- `workflows/compare_wan14_4step_i2v.json`
+- `workflows/compare_ltx2_5_i2v.json`
 
-- ComfyUI distilled INT8: 50.66 seconds; 59,517,292,544 bytes
-- Official DFR: 104.14 seconds; 57,860,374,528 bytes
-- Official TI2Vid HQ: 210.28 seconds; 63,185,891,328 bytes
-
-No repeatable quality winner was established, so Comfy remains the short-video
-default. DFR and TI2Vid HQ remain explicit quality candidates, while
-`ti2_chunked` is the long-video route. The measured report, output hashes,
-quality reports, and raw memory logs are retained under `benchmarks/`,
-`output/`, and `logs/generations/`.
+Both use the same input image, prompt, seed, 640×640 output, 81 frames,
+16 fps, and approximately 5 seconds. On this DGX Spark, Wan 14B 4-step took
+100.352 seconds with 85.71 GiB peak unified-memory use. LTX-2.5 took
+45.686 seconds with 92.77 GiB peak use and also generated stereo audio.
+These are single-sample measurements; they do not establish a general image
+quality ranking.
 
 ## Local automation API
 
@@ -120,24 +105,8 @@ Choose the engine by input type:
   pads it to the model aspect ratio so the body is not center-cropped.
   An optional MP4 supplies motion; when omitted, Wan 5B creates a separate
   neutral human motion guide from the requested action.
-- `ltx25`: video with synchronized audio. The Comfy profile is I2V and
-  requires a matching image. Native DFR/TI2Vid profiles support text or an
-  optional start image. Every LTX job requires license acknowledgement.
-
-Generation profiles are independent from output encoding quality:
-
-- Wan 14B `quality` (default): 20 steps, CFG 3.5, no LightX2V LoRA.
-- Wan 14B `fast`: explicit 4-step LightX2V route.
-- LTX `comfy` (default): existing distilled INT8 baseline.
-- LTX `dfr`: official BF16 DFR production-quality candidate.
-- LTX `ti2_hq`: official guided BF16 two-stage candidate.
-- LTX `ti2_chunked`: 97-frame windows with 25 carried and 25 overlap-blended
-  frames for longer 10/15-second jobs.
-
-MiniMax H3/FastH3, FastVideo, SGLang, NVIDIA Sol-Engine, Diffusers, and
-LongLive are not installed by this change. The backend contract and exclusive
-GPU manager provide the extension boundary for later evaluation without
-coupling those runtimes to the current accepted paths.
+- `ltx25`: image-to-video with audio. A matching image and license
+  acknowledgement are required.
 
 Prompt enhancement is enabled by default and is constrained to preserve
 character count, age, build, and reciprocal actions. Disable it to send the
@@ -153,38 +122,25 @@ The web UI provides two generation modes:
   than raw uncompressed video, so it retains generated pixels while remaining
   an MP4. It requires more time, unified memory, and storage.
 
-Output quality priority does not improve prompt understanding, choreography,
-orientation control, or state tracking; those are handled by model profiles,
-planning, continuation context, and quality gates.
-
 For Wan 5B and Wan 14B, selecting approximately 10 or 15 seconds generates
-consecutive segments. Each accepted segment stores its exact final frame,
-about one second of terminal frames, a tail MP4, timestamps, and Qwen Vision's
-structured subject orientation, pose, direction, speed, held objects, count,
-and camera state. Wan still receives one start frame because its model
-interface cannot carry hidden temporal state; the other terminal data
-constrains the next prompt and the boundary gate. A segment is concatenated
-only after quality and boundary checks pass.
-
-Native LTX `ti2_chunked` keeps temporal context inside one official pipeline
-run using 97-frame windows, 25 carried frames, and 25 overlap-blended frames.
-It does not use the Wan single-frame continuation mechanism.
+consecutive segments. The final frame of each segment becomes the start image
+of the next segment before lossless concatenation. Prompt planning also treats
+all segments as one continuous take, avoiding the former five-second reset.
 
 Any completed Wan 5B or Wan 14B job can be extended:
 
 1. Open it from **最近の生成** and choose **この動画の続きを作る**.
 2. Enter only the new action that happens after the existing ending and choose
    how many additional seconds to generate.
-3. The automation builds or reuses the full continuation bundle, inherits the
-   engine and profile, generates the continuation, checks its opening boundary,
-   and only then concatenates it into cumulative `extended.mp4`.
+3. The automation extracts the exact final frame, inherits the engine and
+   quality/precision settings, generates the continuation, and concatenates
+   the source plus the new clip into one cumulative `extended.mp4`.
 
 An extended result can be extended again. The source job cannot be deleted
 while its continuation is queued or running. The API equivalent is
 `"continuation_of": "SOURCE_JOB_UUID"` in `POST /jobs`; the engine must match
-the source. This completed-video extension remains limited to Wan 5B and
-Wan 14B. A continuation that is static, violates its instruction, or fails the
-boundary check is not published.
+the source. This feature is limited to Wan 5B and Wan 14B because their fixed
+workflows support frame-to-frame segment continuation.
 
 Prompt planning keeps instructions as ordered steps:
 
@@ -194,8 +150,7 @@ Prompt planning keeps instructions as ordered steps:
 - Qwen also returns the visible result after each step and one fixed
   camera-relative body direction. A second pass audits missing items, order,
   state continuity, orientation, and whether hands and carried objects remain
-  physically consistent. One rejected plan is regenerated; a second rejection
-  raises a hard planning failure before any ComfyUI or LTX inference request.
+  physically consistent. One rejected plan is regenerated.
 - Steps are assigned to segments in order. A later segment receives the
   previous segment's resulting state, not a repetition of completed actions.
 - Human-like subjects use a fixed front, side, or back camera view. Positive
@@ -206,19 +161,10 @@ Prompt planning keeps instructions as ordered steps:
   transitions, sudden zoom, face changes, and anatomical orientation errors.
 - The planned steps appear in the job progress as `工程: 1) … → 2) …`.
 
-Every generated segment passes a technical probe, black/frozen interval check,
-and Qwen Vision audit for anatomy, front/back fusion, orientation, identity,
-and instruction progress. Continuations additionally pass boundary
-SSIM/PSNR checks. A high-confidence failure is fed back as a corrective prompt
-and regenerated exactly once with a new seed. A second failure ends the job;
-failed attempts have no `/outputs` URL. Full evidence is saved to
-`output/jobs/JOB_ID/quality-report.json` and the job record.
-
-Wan 14B's default **quality** profile sets the official template to 20 steps,
-CFG 3.5, without LightX2V LoRAs. The **fast** profile explicitly enables the
-4-step route. No extra model is needed. A prior two-segment 640×640 quality
-job took 1,478 seconds versus roughly 100 seconds per fast segment, with
-63.4 GB peak system memory.
+**Motion precision (Wan 14B only)** sets the official template's switch to
+its standard path: 20 steps, CFG 3.5, without the LightX2V 4-step LoRAs. No
+extra model is needed. A two-segment 640×640 job took 1,478 seconds versus
+roughly 100 seconds per 4-step segment, with 63.4 GB peak system memory.
 
 ```bash
 
@@ -239,20 +185,16 @@ When prompt enhancement is enabled, the pipeline asks the installed Qwen model
 for structured English shot prompts and unloads Ollama with `keep_alive: 0`.
 It then calls ComfyUI `/free`, generates each shot through pinned API
 workflows, and finalizes Wan output with FFmpeg metadata removal. LTX jobs
-require `"ltx_license_acknowledged": true`. Comfy, DFR, and TI2 HQ are
-single-shot profiles; `ti2_chunked` accepts the 10/15-second selections.
-All LTX profiles preserve original output without remuxing so provenance
-information is not removed.
+require `"ltx_license_acknowledged": true`, are limited to one shot, and
+preserve the original output without remuxing so provenance information is not
+removed.
 
 Configuration can be overridden with `OLLAMA_MODEL`, `OLLAMA_URL`,
-`COMFY_URL`, `LTX_WORKER_URL`, and `COMFY_TIMEOUT`. GPU backends are selected
-through one exclusive manager: switching releases ComfyUI with `POST /free`,
-the native worker with `POST /release`, and Qwen with `keep_alive: 0`.
-See `docs/troubleshooting.md`.
+`COMFY_URL`, and `COMFY_TIMEOUT`. See `docs/troubleshooting.md`.
 
 ## Offline acceptance test
 
-ComfyUI can be tested in isolation by disconnecting only its Docker network:
+Start ComfyUI, then run:
 
 ```bash
 scripts/test-offline.sh
@@ -261,25 +203,6 @@ scripts/test-offline.sh
 The script disconnects the running container from all Docker networking,
 confirms that external HTTPS is unavailable, regenerates the official 5B test,
 and reconnects the original network using an exit trap.
-
-For final end-to-end acceptance on a remotely administered machine, keep the
-management LAN connected and isolate only the generation services:
-
-```bash
-scripts/test-service-offline-acceptance.sh
-```
-
-The script recreates Automation, Qwen, ComfyUI, and LTX temporarily with
-Docker `network none`. Their local APIs communicate only through shared Unix
-sockets, so the host's SSH/Mac management path stays up while every generation
-service is denied external IP connectivity. It runs Automation → local Qwen →
-ComfyUI Wan → quality gate → continuation bundle and Automation → native LTX
-DFR → quality gate, verifies cancellation and one-model release, records peak
-host memory, and then restores the normal loopback-only services.
-
-`scripts/test-offline-acceptance.sh` remains available for a locally
-administered host whose entire physical network can safely be disconnected.
-Do not use that variant when the network is the only management path.
 
 ## Remove embedded prompt metadata
 

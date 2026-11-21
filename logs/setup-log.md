@@ -862,162 +862,24 @@ UI検証:
 | 親最終フレームと続き先頭を比較 | 接続で場面リセットしない | SSIM 0.991411、PSNR 40.540629 dB。境界前後8フレームで同じ床・壁・青いボールを維持 ✅ |
 | 実行中ピークメモリ | 128GB未満 | 61,403 MiB ✅ |
 
-## 2026-11-20〜21 品質優先マルチバックエンド改修
+## 2026-11-21 品質優先マルチバックエンドからの完全復元
 
-### 制御面・工程監査・Wan 14Bプロファイル
+11/21の品質ゲート／LTX worker 改修を取り消し、11/20 完成動画からの続き生成まで
+のコードと実行構成へ戻した。ジョブ動画・`data/jobs.sqlite3` は削除していない。
+Git 履歴（`936987e`〜`cb72aa6`）は残しており、作業ツリーだけを復元した。
 
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `automation-env/bin/python -m unittest discover -s tests -v` | 既存API、DB移行、キャンセル、継続、バックエンド契約を固定 | 43テスト成功 ✅ |
-| Qwen計画の欠落・順序・状態遷移fixture | 2回目も監査不合格ならGPUへ送らず停止 | `PlanAuditError`、`plan_rejected`イベント、Comfy/LTX生成呼出し0回を確認 ✅ |
-| Wan 14B未指定profileの単体試験 | 20 steps、CFG 3.5、LoRAなし | `quality`が既定、workflow switch `false`を確認 ✅ |
-| Wan 14B `fast`単体試験 | 4 steps、LightX2V LoRAあり | 明示選択時だけworkflow switch `true`を確認 ✅ |
+削除した品質優先専用パス: `automation/backends/`、`automation/quality/`、
+`workers/ltx/`、`tests/`、`benchmarks/`、`Dockerfile.ltx`、
+`docker-compose.offline.yml`、品質ゲート／LTX worker 用スクリプト、
+同日の LTX smoke / 受入ログ。`.dockerignore` から LTX worker 用許可を外した。
 
-実装では`automation/backends/`へComfy/LTX共通契約、registry、排他的
-GPU managerを追加した。モデル切替前にComfy `/free`、LTX `/release`、
-Ollama `keep_alive: 0`を実行する。
-
-### 継続Bundleと品質ゲート
+### 実行コマンド → 期待結果 → 実際の結果
 
 | 実行コマンド | 期待結果 | 実際の結果 |
 |---|---|---|
-| 成功区間からContinuationBundleを作成 | 終端約1秒の9フレーム、tail MP4、厳密な最終フレーム、probe、Qwen動作状態を保存 | `continuation_json`とジョブ配下資産へ保存、次プロンプトへ人数・向き・姿勢・方向・速度・保持物・カメラ状態を反映 ✅ |
-| synthetic moving/frozen/black fixtureを校正 | 正常動画だけ合格 | moving合格、5秒静止と黒動画をhard failureとして検出 ✅。`benchmarks/quality-gate-calibration.json`へ保存 |
-| 人体向き不履行動画を生成 | 高信頼違反を検出し1回だけ再生成 | カメラズーム違反を検出、2試行目も不合格で失敗終了。失敗動画は`/outputs`からHTTP 404 ✅ |
-| Wan継続 Job `a359b39a-bd81-4319-8106-fb655efe513d` | Bundleを使い、品質合格時だけ公開 | Bundleで2回生成まで進行。モデルが静止したため両試行を品質ゲートが遮断し非公開 ✅ |
-
-品質判定はffprobe形式、黒/フリーズ、Qwen Visionの人体構造・正背面融合・
-向き・ID・指示進行、継続境界SSIM/PSNRを集約する。不合格理由を反映した
-自動再生成は正確に1回で終了する。
-
-### 公式LTXワーカーの固定・構築
-
-固定値:
-
-- LTX repository commit:
-  `daa6b16fc7f0f1628f2c9e36a303e3312b333cc6`
-- `ltx-pipelines` 1.6.2
-- worker image:
-  `unbound-ltx-worker:1.6.2`
-- image ID:
-  `sha256:bd25de6c8e3ad890f46a3cecfcabf55211cd43b3a2dbfe1778aeca144114592b`
-- PyTorch `2.13.0+cu132`、NATTEN `0.21.7`
-- loopback bind `127.0.0.1:8191`
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `docker compose --profile ltx build ltx` | ARM64固定依存だけでworkerを構築 | 初回構築成功後、実推論時にTriton launcher用C compiler不足で失敗 ❌ |
-| `Dockerfile.ltx`へ`gcc libc6-dev`を追加して再build | 初回CUDA launcherをローカルコンパイル | 再構築成功、`gcc 12.2.0`、TI2/DFR/chunked実推論成功 ✅ |
-| `/health` | 固定versionとprofile readinessを返す | commit/version一致、最終的に`ti2_hq=true`、`dfr=true`、`ti2_chunked=true` ✅ |
-| `ss -ltn`、Compose/コンテナinspect | 外部へ公開せず、モデルread-only、権限縮小 | 8001/8188/8191/11434すべて`127.0.0.1`、LTX user 10001、capabilities ALL drop、models read-only ✅ |
-
-### Native LTXモデル取得
-
-大容量取得はユーザー承認後に実施した。`scripts/download-models.py`は
-認証付きRange再開へ改修し、切断・DNS障害時に取得済みbyteを保持し、
-Range無視応答で既存partialをtruncateしない。
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `scripts/download-models.py ltx25-hq` | dev BF16、BF16 text encoder、distilled LoRA、duration headを固定SHAで取得 | 接続切断を挟んだが再開し、全資産のsize/SHA256検証成功 ✅ |
-| `scripts/download-models.py ltx25-dfr`（初回） | distilled BF16とDFR detailing LoRAを取得 | detailing LoRA repositoryがgatedでHTTP 403 ❌。既存資産は保持 |
-| Hugging Faceで同repositoryの`Agree and Access`後に再実行 | 327,322,640-byte LoRAを取得 | SHA256 `984851b7...b283c1d`一致、全DFR資産検証成功 ✅ |
-
-新規native資産は既存VAE/upscalerを除き119,531,295,248 bytes。
-全サイズ・SHA256は`models/MANIFEST.md`へ記録した。
-
-### Native LTX実GPU受入
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| TI2 HQ 256×256、9 frames | guided二段階の最小生成 | 204.19秒、peak host memory 59,767,787,520 bytes、成功 ✅ |
-| `ti2_chunked` 256×256、105 frames | 97-frame窓・25-frame carry・25-frame overlap blendで長尺生成 | 352.58秒、peak 59,637,501,952 bytes、成功 ✅ |
-| Automation→TI2 HQ 960×576、121 frames | API、計画、native worker、品質ゲート、Bundleを統合 | Job `980028f1-e391-4470-8473-e525835d8364`、333.42秒、peak 59,067,547,648 bytes、全ゲート合格 ✅ |
-| DFR 256×256、9 frames | detailing LoRA経路の最小生成 | 72.07秒、peak 53,689,622,528 bytes、成功 ✅ |
-| Automation→DFR 960×576、121 frames | text-to-video、工程監査、品質ゲート、Bundleを統合 | Job `0821c03a-0bdc-4651-a277-b5ef327fc48d`、約178.6秒、技術・フリーズ・意味ゲート合格 ✅ |
-
-LTX出力にはvideo H.264とaudio AACの2 streamがあり、5.0625秒動画に対し
-音声は5.0500〜5.0625秒だった。原本へremux/metadata除去は行っていない。
-
-### 3経路・2 seed同条件比較
-
-条件は公式dragon画像、同一prompt、640×640、81 frames、16 fps、
-seed 10 / 314159。各生成前に他モデルを解放した。
-
-| 経路 | 2回の時間 | 最大peak host memory | 品質結果 |
-|---|---:|---:|---|
-| ComfyUI LTX distilled INT8 | 57.02 / 44.30秒 | 59,517,292,544 bytes | 2/2合格 |
-| DFR BF16 + detailing LoRA | 110.13 / 98.14秒 | 57,860,374,528 bytes | 2/2合格 |
-| TI2Vid Two-Stage HQ | 208.26 / 212.30秒 | 63,185,891,328 bytes | 2/2合格 |
-
-3経路とも人体、正背面融合、向き、ID、指示、形式、黒/フリーズ検査に合格。
-この2 seedではnative経路の再現可能な品質優位を立証できなかったため、
-短尺既定はComfyのまま、DFR/HQを明示選択、長尺は`ti2_chunked`とした。
-詳細、出力SHA256、blind label、各ログは
-`benchmarks/ltx-backend-comparison.json`へ保存した。
-
-### ComfyUI 0.45.0単体オフライン再受入
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `scripts/test-offline.sh` | ComfyコンテナをDocker networkから切断し、外部通信なしで公式5Bを再生成 | 外部HTTPSは`URLError`、prompt `dc9a9850-05c5-4fcf-8909-381d214e6c9d`が328.49秒で成功 ✅ |
-| exit trap後にUI確認 | 元networkへ復帰 | `127.0.0.1:8188`でHTTP 200 ✅ |
-
-### 管理LANを維持した完全サービス隔離受入
-
-当初はホストのWi-Fi/有線LANを両方切断する手順を準備したが、このマシンは
-Macからネットワーク越しに管理しており、管理経路を失うため中止した。
-ホスト接続を維持しつつ生成サービスだけを実ネットワークから隔離する
-`scripts/test-service-offline-acceptance.sh`へ変更した。
-
-隔離構成:
-
-- Automation、Ollama/Qwen、ComfyUI、LTXをすべてDocker
-  `network_mode: none`で一時起動。
-- サービス間HTTPだけを共有Unix socket relayで接続。
-- 4コンテナ内から`1.1.1.1:443`へ接続し、すべて`OSError`を確認。
-- Docker socketはFFmpeg/ffprobeの固定`compose exec`にだけ使用。
-- exit trapで通常の127.0.0.1限定サービスを再作成し、APIを再起動。
-
-構築時の失敗と復旧:
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| user systemd `IPAddressDeny=any` / `PrivateNetwork=yes` | host loopbackだけ許可 | user managerでは制限が適用されず外部到達したため不採用 ❌ |
-| `unshare --user --map-root-user --net` | 非特権network namespace | uid_mapが許可されず不採用 ❌ |
-| 初回isolated Automation起動 | APIをprivate loopbackで起動 | working directoryが`/opt/ComfyUI`で`automation` import失敗。project rootへ`cd`して復旧 |
-| 初回isolated Ollama計画 | Qwenをローカルロード | `llama-server`外部binary不足。`/usr/local/lib/ollama`をread-only mountして復旧 |
-| 初回品質検査 | isolated Comfyへffprobe | UID 1000が`/root/.docker/config.json`を読めずCompose plugin未検出。`HOME=/home/ubuntu`へ修正 |
-
-最終結果:
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| 4コンテナの`NetworkMode`と外部socket接続を確認 | 全サービス`none`、外部接続失敗 | 4/4で`network none`、4/4で外部接続`OSError` ✅ |
-| isolated Automation→Qwen→Comfy Wan→品質ゲート→Bundle | 外部通信なしで生成・検査 | Job `44525b23-3da5-4d84-ae30-8f9f65e70c51`、約176.2秒、全ゲート合格 ✅ |
-| isolated Automation→Qwen→LTX DFR→品質ゲート→Bundle | 外部通信なしでnative生成・検査 | Job `df419b7f-f29f-40b2-91b8-6e06c511b50c`、約172.1秒、全ゲート合格 ✅ |
-| 待機ジョブを即時cancel | GPU実行前にcancelled | Job `a951dd5f-f763-4eb9-8b3b-468a83472189`、outputなし ✅ |
-| 受入後Ollama `/api/ps` / LTX `/health` | モデル常駐なし | `models=[]`、`active_job_id=null` ✅ |
-| 受入中MemAvailable監視 | 128GB内で逐次実行 | minimum 71,976,230,912 bytes、peak used 58,684,743,680 bytes ✅ |
-| exit trap後の通常サービス確認 | Mac接続を維持して127.0.0.1限定へ復元 | API/Comfy/LTX/Ollama正常、8001/8188/8191/11434すべてloopback限定 ✅ |
-
-レポート:
-`logs/offline-acceptance-20261121T020905Z.json`
-
-## 2026-11-21 生成失敗の対策（品質ゲートの誤判定と無駄な再生成）
-
-失敗例: Job `83a77d3c-a8ae-4b6a-b9fb-19e5133bdacd`（wan14 quality、1ショット、約25分で失敗）。
-
-| 原因 | 実際の挙動 | 対策 |
-|---|---|---|
-| 通常I2Vでもユーザーの開始画像と生成1フレーム目をSSIM≥0.95 / PSNR≥30で比較 | 意味監査は合格なのにSSIM 0.677 / PSNR 8.75で不合格（I2Vは開始画像を再描画するため一致しない） | 境界判定は前セグメント／親ジョブの実フレームを渡す継続時だけに限定 |
-| 決定的な指標（境界・技術）でも1回再生成 | 再生成しても同じ値で再び不合格、12分超を浪費 | `should_retry`は全hard issueが`semantic`/`temporal`の時だけ再生成 |
-| 補正文がない時にhard issueのメッセージ（"Boundary SSIM..."）を動画プロンプトへ混入 | 再生成でうさぎが静止し意味監査も不合格 | 補正文は監査の`corrective_prompt`と、静止・黒画面用の固定制約だけ |
-| 1ショットの最終出力をQwenで再監査 | 同じ映像を再判定し、判定の揺れで合格映像を捨てうる | 新規1ショットでは最終再監査を省略（複数ショット・継続時は従来通り） |
-| `start-api.sh`がPIDファイル外の旧APIを検出できない | 再起動後も旧コード（PID 1097607）が8001番で応答 | 8001番が未追跡プロセスに使用中なら起動を拒否、自プロセス生存も確認 |
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `automation-env/bin/python -m unittest discover -s tests` | 全テスト合格 | 45 tests OK ✅ |
-| 旧API停止→`scripts/start-api.sh` | 新コードのPIDが8001番を保持 | PID 1228186 = `run/automation-api.pid` ✅ |
-| PIDファイル退避して`scripts/start-api.sh` | 未追跡プロセス検出で起動拒否 | exit 1、PID 1228186を表示 ✅ |
+| 15ファイルの作業ツリーが 11/20 相当であること | `continuation_of` あり、品質ゲート import なし | `automation/app.py` 1999行、`continuation_of` あり、backends/quality 参照なし ✅ |
+| 品質優先専用ファイルを削除 | 混在ファイルが残らない | 対象パス削除済み。残件スキャン 0件 ✅ |
+| `docker stop/rm unbound-ltx-worker` | ComfyUI のみ残る | `unbound-comfyui` のみ Up / healthy。LTX worker コンテナ削除 ✅ |
+| `python3 -m py_compile automation/app.py` | 構文エラーなし | `COMPILE_OK` ✅ |
+| 品質優先 API (PID 1228186) を停止し `scripts/start-api.sh` | 127.0.0.1:8001 で旧API | PID 1233113。`/health` は `service`/`ollama`/`comfyui` のみ（`ltx` なし）。UI 200 ✅ |
+| ComfyUI キュー | 空 | `queue_running`/`queue_pending` とも空 ✅ |

@@ -1,6 +1,6 @@
 # モデルライセンス確認
 
-確認日: 2026-11-21
+確認日: 2026-11-19
 
 これは実装時に確認した原文の要約であり、法的助言ではない。利用時には
 必ずリンク先の最新版を再確認すること。
@@ -26,19 +26,12 @@
 ## LTX-2.5
 
 - 配布元: `Lightricks/LTX-2.5`
-- 固定revision: `49b093a39c19169a8a81721dcc541e07e945232f`
-- DFR detailing LoRA:
-  `Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler`
-- DFR LoRA固定revision:
-  `59f26f1e0c11af42f1affa924b4ef231e9e98b2a`
-- 公式実行器: `Lightricks/LTX-2` commit
-  `daa6b16fc7f0f1628f2c9e36a303e3312b333cc6`
 - ライセンス: LTX-2.x Community License Agreement
 - 原文:
   <https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x>
 - Acceptable Use Policy:
   <https://static.lightricks.com/legal/ltx-acceptable-use-policy.pdf>
-- 確認したライセンス日: 2026-08-11、改定日: 2026-11-11
+- 確認したライセンス日: 2026-08-11、改定日: 2026-10-29
 - 確認したAUP更新日: 2026-11-03
 
 主な条件:
@@ -57,23 +50,15 @@
   ファンタジーの生成を禁止している。
 - コンテンツ来歴情報、電子透かし、その他のprovenance signalを除去・妨害する
   こともAUPで禁止されている。
-- 2026-11-11改定では、契約終了後も存続する条項の指定が更新された。
-  推論・配布・出力に関する利用条件そのものが緩和されたとは解釈しない。
 
 したがって、LTX-2.5は本プロジェクトで一般映像の性能比較には使用できるが、
 当初想定されている性的に露骨な用途にはライセンス上使用できない。
 また、LTX出力に来歴情報が含まれる場合、`strip-metadata.sh`を適用してよいかは
 原文と具体的なメタデータの性質を再確認するまで未確認とする。
-本プロジェクトでは、ComfyUI、`TI2VidTwoStagesHQPipeline`、
-`DFRPipeline`、chunkedパイプラインのいずれでもLTX出力をremuxせず、
-生成された原本をそのまま成果物として保持する。実測したHQ/DFR出力の
-MP4タグは標準的なcontainer/codecタグのみだったが、今後のモデル更新で
-来歴信号が追加されても失われないよう、存在有無にかかわらずLTX原本へ
-`strip-metadata.sh`を適用しない。
 
 ## Hugging Faceアクセス
 
-`Lightricks/LTX-2.5`とDFR detailing LoRAのrepositoryはgatedである。
-それぞれについてHugging Face上でライセンスとプライバシー条件を確認して
-「Agree and Access」を実行し、ローカル端末で`hf auth login`を完了する
-必要がある。トークンをログ、チャット、コンテナイメージへ入れないこと。
+`Lightricks/LTX-2.5`はgated repositoryである。取得前にHugging Face上で
+ライセンスとプライバシー条件を確認して「Agree and Access」を実行し、
+ローカル端末で`hf auth login`を完了する必要がある。トークンをログや
+チャットへ貼り付けないこと。

@@ -1,8 +1,5 @@
-**
+# Keep the ComfyUI build context small. The image only needs the Manager config.
+*
 !Dockerfile
-!Dockerfile.ltx
 !config/
 !config/comfyui-manager.ini
-!workers/
-!workers/ltx/
-!workers/ltx/**

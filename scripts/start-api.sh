@@ -9,15 +9,7 @@ if [[ ! -x automation-env/bin/uvicorn ]]; then
     automation-env/bin/pip install -r requirements-automation.txt
 fi
 
-need_containers=0
 if ! curl -fsS -o /dev/null http://127.0.0.1:8188/ 2>/dev/null; then
-    need_containers=1
-fi
-if docker image inspect unbound-ltx-worker:1.6.2 >/dev/null 2>&1 \
-    && ! curl -fsS -o /dev/null http://127.0.0.1:8191/health 2>/dev/null; then
-    need_containers=1
-fi
-if (( need_containers )); then
     if docker compose ps >/dev/null 2>&1; then
         scripts/start.sh
     else
@@ -39,12 +31,6 @@ if [[ -f "$pid_file" ]]; then
     fi
     rm -f "$pid_file"
 fi
-if ss -Htln 'sport = :8001' | grep -q .; then
-    echo "Port 8001 is held by a process not tracked in $pid_file:" >&2
-    ss -Htlnp 'sport = :8001' >&2
-    echo "Stop that process first so the current code is served." >&2
-    exit 1
-fi
 
 nohup automation-env/bin/uvicorn automation.app:app \
     --host 127.0.0.1 \
@@ -54,8 +40,7 @@ api_pid=$!
 echo "$api_pid" > "$pid_file"
 
 for _ in $(seq 1 60); do
-    if kill -0 "$api_pid" 2>/dev/null \
-        && curl -fsS -o /dev/null http://127.0.0.1:8001/health 2>/dev/null; then
+    if curl -fsS -o /dev/null http://127.0.0.1:8001/health 2>/dev/null; then
         echo "Automation API is ready at http://127.0.0.1:8001/"
         exit 0
     fi

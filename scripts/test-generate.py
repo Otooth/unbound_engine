@@ -76,15 +76,6 @@ def main() -> None:
         "--prompt-id",
         help="Monitor an already queued prompt instead of submitting API JSON",
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        help="Override every RandomNoise noise_seed in the API workflow",
-    )
-    parser.add_argument(
-        "--filename-prefix",
-        help="Override every SaveVideo filename_prefix in the API workflow",
-    )
     parser.add_argument("--timeout", type=int, default=7200)
     args = parser.parse_args()
     workflow_path = args.workflow.resolve()
@@ -96,19 +87,6 @@ def main() -> None:
         print(f"Monitoring prompt {prompt_id}")
     else:
         workflow = json.loads(workflow_path.read_text())
-        for node in workflow.values():
-            if not isinstance(node, dict):
-                continue
-            inputs = node.get("inputs")
-            if not isinstance(inputs, dict):
-                continue
-            if args.seed is not None and node.get("class_type") == "RandomNoise":
-                inputs["noise_seed"] = args.seed
-            if (
-                args.filename_prefix
-                and node.get("class_type") == "SaveVideo"
-            ):
-                inputs["filename_prefix"] = args.filename_prefix
         response = request_json(f"{args.url}/prompt", {"prompt": workflow})
         prompt_id = str(response["prompt_id"])
         print(f"Queued prompt {prompt_id}")
@@ -171,10 +149,6 @@ def main() -> None:
         "queued_at": queued_at.isoformat(),
         "elapsed_seconds": elapsed,
         "workflow": str(workflow_path.relative_to(PROJECT_ROOT)),
-        "overrides": {
-            "seed": args.seed,
-            "filename_prefix": args.filename_prefix,
-        },
         "host_min_available_bytes": min_available,
         "host_peak_used_bytes": peak_used,
         "comfy_min_vram_free_bytes": min_comfy_vram_free,

@@ -12,13 +12,5 @@ if curl -fsS -o /dev/null http://127.0.0.1:8188/; then
         http://127.0.0.1:8188/free
 fi
 
-if curl -fsS -o /dev/null http://127.0.0.1:8191/; then
-    curl -fsS \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{}' \
-        http://127.0.0.1:8191/release || true
-fi
-
-docker compose --profile ltx stop
+docker compose stop
 free -g
