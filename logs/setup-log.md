@@ -1003,20 +1003,3 @@ Macからネットワーク越しに管理しており、管理経路を失う�
 
 レポート:
 `logs/offline-acceptance-20261121T020905Z.json`
-
-## 2026-11-21 直前変更のロールバックとGit初期化
-
-ユーザー指定により、軽量品質チェック切替と、その際に追加した生成前拒否
-チェックをどちらも取り消し、品質優先マルチバックエンド改修完了時点へ戻した。
-マルチバックエンド、20-step Wan品質既定、Continuation Bundle、LTX公式経路、
-厳格品質ゲート＋1回限定自動再生成は維持した。
-
-| 実行コマンド | 期待結果 | 実際の結果 |
-|---|---|---|
-| `git status --short --branch` | 既存Git履歴を確認 | `.git`がなく、Git履歴からのrevertは不可能と確認 |
-| 直前変更を逆適用 | 軽量検査切替と生成前拒否追加前の実装へ復元 | API、UI、テスト、READMEから該当変更を削除 ✅ |
-| `automation-env/bin/python -m py_compile ...` | ロールバック後の構文成功 | 成功 ✅ |
-| `automation-env/bin/python -m unittest discover -s tests -v` | 一つ前のテスト集合が成功 | 43テスト成功 ✅ |
-| APIプロセス停止後`scripts/start-api.sh` | 復元コードで再起動 | `http://127.0.0.1:8001/`でready ✅ |
-| `.gitignore`を追加 | モデル、入力、出力、DB、venv、vendor cloneを除外 | 212GBのモデル資産を含む実行時データを追跡対象外に設定 ✅ |
-| `git init -b main && git add -A` | ソースと再現性文書だけをステージ | 98ファイル、Git object約1MB。秘密鍵・既知トークン形式の一致なし ✅ |
