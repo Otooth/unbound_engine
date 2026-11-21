@@ -11,7 +11,7 @@ ComfyUI is published only on `127.0.0.1:8188`.
 - Wan 2.2 I2V-14B FP8 scaled + LightX2V 4-step LoRA
 - Wan Animate 2 distilled 14B INT8 ConvRot
 - LTX-2.5 distilled Transformer/Text Encoder INT8 ConvRot
-- Z-Image Turbo BF16 text-to-image (workflow pinned; model download pending)
+- Z-Image Turbo BF16 text-to-image (1024×1024 in about 10 seconds)
 - Official 1280×704, 121-frame, 24 fps workflow
 - Container build and source revisions pinned in `versions.lock`
 - ComfyUI-Manager configured with `network_mode = offline`
@@ -130,6 +130,11 @@ Choose the engine by input type:
 Deleting an image job also removes `generated-JOB_ID.png`. Deletion is refused
 while a queued or running video still uses that image. Download the model with
 `hf-env/bin/python scripts/download-models.py zimage` (about 20.7 GB).
+
+Measured on this DGX Spark: a 1024×1024 image job took 22 seconds end to end
+(11 s Qwen planning, 10 s generation) with 57.2 GB peak system memory. Using
+that image, a 5-second Wan 14B 4-step video took 114 seconds with 56.7 GB peak
+and kept the person, clothing, and background from the image.
 
 Prompt enhancement is enabled by default and is constrained to preserve
 character count, age, build, and reciprocal actions. Disable it to send the

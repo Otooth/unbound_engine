@@ -961,3 +961,21 @@ Git 履歴（`936987e`〜`cb72aa6`）は残しており、作業ツリーだけ�
 動画生成の通し確認。確認方法: ネットワーク接続後に
 `hf-env/bin/python scripts/download-models.py zimage` を実行し、UI から1枚生成して
 Wan 14B で動画化する。
+
+## 2026-11-22 Z-Image Turbo 取得と画像→動画の通し確認
+
+- ネットワーク: Wi-Fi `Pixel_3494`（ユーザーが接続）。有線 `enP7s7` は Mac 直結のみ。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `hf-env/bin/python scripts/download-models.py zimage` | 3ファイル取得、サイズ・SHA256一致 | 05:34〜06:49（75分）。途中で接続切断・タイムアウトが数回あったが自動再開。3ファイルとも `OK`（MANIFEST の SHA256 と一致） ✅ |
+| ComfyUI `object_info` | 新モデルを認識 | `z_image_turbo_bf16.safetensors`、`qwen_3_4b.safetensors` を認識 ✅ |
+| UI/API で画像ジョブ（公園のベンチに座る赤いジャケットの男性、正方形、Seed 20261122）。Job `df332b49-…` | 1枚の PNG、メタデータなし | 22.0秒で成功（Qwen 11秒、生成10秒）。依頼どおりの全身像。`image.png` と `input/generated-…png` は `IHDR,pHYs,IDAT,IEND` のみ ✅ |
+| 画像ジョブ中のメモリ（`free -m` 1秒間隔） | 128GB未満 | 待機 12.9GB → ピーク 57.2GB ✅ |
+| 生成画像を開始画像に Wan 14B 4ステップ（立ち上がって手を振る）。Job `cca83380-…` | 5秒動画、人物維持 | 114.1秒で成功。640×640、16fps、81フレーム、5.06秒。座る→立つ→手を振るの順、顔・服装・背景を維持 ✅ |
+| 動画ジョブ中のメモリ | 128GB未満 | 待機 13.8GB → ピーク 56.7GB ✅ |
+
+補足: ComfyUI が直接書き出す中間 PNG（`image_zimage_00001_.png`）にはプロンプトの
+`tEXt` が残る。外部へ出すのは除去済みの `image.png` を使う。

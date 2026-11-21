@@ -67,14 +67,13 @@ Revision: `49b093a39c19169a8a81721dcc541e07e945232f`
 
 Total: 39,709,872,236 bytes.
 
-## Z-Image Turbo (BF16) — not downloaded yet
+## Z-Image Turbo (BF16)
 
 Source: `Comfy-Org/z_image_turbo`  
 Revision: `6fc90a3b1b653e935a0d175e260736de25b84df5`
 
-Expected values from the Hugging Face tree API (LFS SHA256). The local files
-have not been downloaded or verified yet; `scripts/download-models.py zimage`
-checks these values after download.
+Downloaded on 2026-11-22 with `scripts/download-models.py zimage`; the local
+size and SHA256 of every file matched the values below.
 
 | Local path | Source path | Size (bytes) | SHA256 |
 |---|---|---:|---|

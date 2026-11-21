@@ -67,7 +67,7 @@ status = "downloaded_and_verified"
 [models.z_image_turbo]
 repository = "Comfy-Org/z_image_turbo"
 revision = "6fc90a3b1b653e935a0d175e260736de25b84df5"
-status = "pinned_not_downloaded"
+status = "downloaded_and_verified"
 
 [automation]
 ollama_version = "0.40.3"
