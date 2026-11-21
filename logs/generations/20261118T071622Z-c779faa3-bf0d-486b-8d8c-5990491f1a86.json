@@ -1,0 +1,51 @@
+{
+  "prompt_id": "c779faa3-bf0d-486b-8d8c-5990491f1a86",
+  "queued_at": "2026-11-18T07:16:22.383072+00:00",
+  "elapsed_seconds": 326.37224233616143,
+  "workflow": "workflows/video_wan2_2_5B_ti2v.api.json",
+  "host_min_available_bytes": 65133924352,
+  "host_peak_used_bytes": 65527050240,
+  "comfy_min_vram_free_bytes": 795258368,
+  "outputs": {
+    "58": {
+      "images": [
+        {
+          "filename": "wan2_2_5B_default_00001_.mp4",
+          "subfolder": "video",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  },
+  "status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "c779faa3-bf0d-486b-8d8c-5990491f1a86",
+          "timestamp": 1794986182405
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "c779faa3-bf0d-486b-8d8c-5990491f1a86",
+          "timestamp": 1794986182406
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "c779faa3-bf0d-486b-8d8c-5990491f1a86",
+          "timestamp": 1794986507182
+        }
+      ]
+    ]
+  }
+}

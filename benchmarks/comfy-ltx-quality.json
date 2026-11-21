@@ -1,0 +1,107 @@
+{
+  "1": {
+    "gate": "aggregate",
+    "issues": [],
+    "metrics": {
+      "reports": [
+        {
+          "gate": "technical",
+          "passed": true,
+          "metrics": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "duration": 5.0625,
+            "fps": 16.0,
+            "width": 1280,
+            "height": 704
+          }
+        },
+        {
+          "gate": "temporal",
+          "passed": true,
+          "metrics": {
+            "black_intervals": [],
+            "freeze_intervals": [],
+            "min_black_duration": 0.5,
+            "min_freeze_duration": 2.0
+          }
+        },
+        {
+          "gate": "semantic",
+          "passed": true,
+          "metrics": {
+            "audit": {
+              "anatomy_valid": true,
+              "front_back_fusion_absent": true,
+              "orientation_consistent": true,
+              "instruction_followed": true,
+              "identity_consistent": true,
+              "confidence": 0.98,
+              "evidence": [
+                "The character maintains a consistent white dragon warrior appearance with no anatomical errors or identity changes across the contact sheet.",
+                "The camera movement is clearly depicted as a slow push-in (zoom) towards the warrior's face and upper body, transitioning from a medium shot to a close-up.",
+                "The warrior remains standing still throughout the sequence, fulfilling the 'stands still' instruction.",
+                "The lighting and glowing eyes effectively convey the requested 'determination and strength'."
+              ],
+              "corrective_prompt": ""
+            },
+            "confidence_threshold": 0.75,
+            "contact_sheet": "jobs/benchmark-comfy-ltx-1/quality_attempt_1_contact.png",
+            "reference_image": "video_wan2_2_14B_i2v_input_image.jpg"
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "gate": "aggregate",
+    "issues": [],
+    "metrics": {
+      "reports": [
+        {
+          "gate": "technical",
+          "passed": true,
+          "metrics": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "duration": 5.0625,
+            "fps": 16.0,
+            "width": 640,
+            "height": 640
+          }
+        },
+        {
+          "gate": "temporal",
+          "passed": true,
+          "metrics": {
+            "black_intervals": [],
+            "freeze_intervals": [],
+            "min_black_duration": 0.5,
+            "min_freeze_duration": 2.0
+          }
+        },
+        {
+          "gate": "semantic",
+          "passed": true,
+          "metrics": {
+            "audit": {
+              "anatomy_valid": true,
+              "front_back_fusion_absent": true,
+              "orientation_consistent": true,
+              "instruction_followed": true,
+              "identity_consistent": true,
+              "confidence": 0.95,
+              "evidence": [
+                "The character maintains a consistent white dragon warrior appearance with no anatomical impossibilities or identity changes across the contact sheet.",
+                "The camera movement is evident through the changing perspective and framing of the warrior in each frame, simulating a slow approach or circle as requested.",
+                "The warrior remains standing still throughout the sequence, fulfilling the static pose requirement."
+              ],
+              "corrective_prompt": ""
+            },
+            "confidence_threshold": 0.75,
+            "contact_sheet": "jobs/benchmark-comfy-ltx-2/quality_attempt_2_contact.png",
+            "reference_image": "video_wan2_2_14B_i2v_input_image.jpg"
+          }
+        }
+      ]
+    }
+  }
+}

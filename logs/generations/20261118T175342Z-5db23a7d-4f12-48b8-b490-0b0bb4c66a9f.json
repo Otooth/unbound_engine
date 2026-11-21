@@ -1,0 +1,51 @@
+{
+  "prompt_id": "5db23a7d-4f12-48b8-b490-0b0bb4c66a9f",
+  "queued_at": "2026-11-18T17:53:42.461799+00:00",
+  "elapsed_seconds": 98.15667713945732,
+  "workflow": "workflows/compare_wan14_4step_i2v.json",
+  "host_min_available_bytes": 38634713088,
+  "host_peak_used_bytes": 92026261504,
+  "comfy_min_vram_free_bytes": 5642219520,
+  "outputs": {
+    "108": {
+      "images": [
+        {
+          "filename": "compare_wan14_4step_00002_.mp4",
+          "subfolder": "video",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  },
+  "status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "5db23a7d-4f12-48b8-b490-0b0bb4c66a9f",
+          "timestamp": 1795024419127
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "5db23a7d-4f12-48b8-b490-0b0bb4c66a9f",
+          "timestamp": 1795024419130
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "5db23a7d-4f12-48b8-b490-0b0bb4c66a9f",
+          "timestamp": 1795024519479
+        }
+      ]
+    ]
+  }
+}

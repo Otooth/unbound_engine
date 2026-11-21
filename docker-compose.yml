@@ -1,0 +1,93 @@
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unbound-comfyui:0.45.0
+    container_name: unbound-comfyui
+    init: true
+    restart: unless-stopped
+    gpus: all
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "127.0.0.1:8188:8188"
+    environment:
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ./models:/opt/ComfyUI/models:ro
+      - ./input:/opt/ComfyUI/input
+      - ./output:/opt/ComfyUI/output
+      - ./workflows:/opt/ComfyUI/user/default/workflows:ro
+      - ./config/comfyui-manager.ini:/opt/ComfyUI/user/__manager/config.ini:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 2048
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8188/', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  ltx:
+    profiles:
+      - ltx
+    build:
+      context: .
+      dockerfile: Dockerfile.ltx
+    image: unbound-ltx-worker:1.6.2
+    container_name: unbound-ltx-worker
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    gpus: all
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    environment:
+      LTX_WORKER_HOST: "127.0.0.1"
+      LTX_WORKER_PORT: "8191"
+      LTX_OFFLOAD_MODE: "cpu"
+      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      UV_OFFLINE: "1"
+      PIP_NO_INDEX: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ./models:/models:ro
+      - ./input:/data/input:ro
+      - ./output:/data/output
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 4096
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8191/health', timeout=5)"
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s

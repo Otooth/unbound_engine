@@ -1,0 +1,1022 @@
+# セットアップログ
+
+## 2026-11-18 手順1: 事前確認
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `uname -m` | `aarch64` | `aarch64` ✅ |
+| `cat /etc/os-release` | Ubuntu 24.04 系 (DGX OS) | Ubuntu 24.04.5 LTS (noble) ✅ |
+| `nvidia-smi` | GB10 が見える、CUDA 13 系 | NVIDIA GB10 / Driver 580.178.04 / CUDA 13.0 ✅。Memory-Usage は `Not Supported`（統合メモリのため。GPU メモリは `free` で見る必要あり） |
+| `docker --version` | 存在する | Docker 29.6.2 ✅ |
+| `docker compose version` | v2 以降 | v5.2.0 ✅ |
+| `nvidia-ctk --version` | 存在する | NVIDIA Container Toolkit 1.20.1 ✅ |
+| `docker info` / `docker run --rm --gpus all <CUDAベース> nvidia-smi` | GPU がコンテナから見える | ❌ **未実施**: `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock` |
+| `df -h /` | 数百GB以上の空き | 3.7T 中 3.4T 空き ✅ |
+| `free -g` | 約 128GB | total 121 / used 8 / available 113 / swap 15 ✅ |
+| `docker image ls --format '{{.Repository}}:{{.Tag}}'` | ローカルの CUDA ベースイメージ候補を確認できる | ❌ Docker ソケットへのアクセス拒否 |
+| `id && stat -c '%A %U %G %n' /var/run/docker.sock && getent group docker` | Docker 権限エラーの原因を特定できる | ユーザーは `docker` グループに未所属。ソケットは `root:docker`、モード `660` |
+| `sudo usermod -aG docker saitoshinya` | `saitoshinya` が `docker` グループに追加される | ❌ sudo が対話的なパスワード入力を要求したため、エージェントからは実行不可 |
+| ユーザー端末で `sudo usermod -aG docker saitoshinya` | `saitoshinya` が `docker` グループに追加される | `docker:x:988:saitoshinya` を確認 ✅。現在のシェルには未反映のため、以降は一時的に `sg docker -c` を使用 |
+| `docker buildx imagetools inspect nvidia/cuda:13.0.0-base-ubuntu24.04` | CUDA 13.0公式イメージが `linux/arm64` に対応している | `linux/arm64` マニフェスト `sha256:c33da1d7a948e960842549e344af32eed7d8be20d1922ff99b52c119b08c72a7` を確認 ✅ |
+| `sg docker -c "docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu24.04 nvidia-smi"` | GPU がコンテナから見える | イメージ取得後、NVIDIA GB10 / Driver 580.178.04 / CUDA 13.0 を確認 ✅。イメージリストdigestは `sha256:6e43a6b02e5f16e4a715953be8b29c40acbe84aed11a61357ef0fc899967fbd9` |
+
+### 補足
+- 現ユーザー `saitoshinya` は `docker` グループ（gid 988, メンバー無し）に属していない。ソケットは `root:docker 660`。
+- `/etc/docker/daemon.json` は存在しない。`/var/run/cdi/nvidia.yaml` はある（CDI 経由で GPU を渡せる見込み、未確認）。
+- GPU 上では Xorg / gnome-shell / firefox 等 GUI プロセスが計 約0.8GB 使用中。
+
+### 失敗と復旧案
+- 原因: docker ソケットへの権限なし。
+- 復旧案（sudo が必要なためユーザー確認待ち）:
+  - A) `sudo usermod -aG docker saitoshinya` → 再ログイン（または `newgrp docker`）。注意: docker グループは実質 root 相当の権限。
+  - B) docker コマンドを毎回 `sudo docker ...` で実行。
+- ユーザー承認後に A を試行したが、sudo の対話的パスワード入力が必要なため停止。ユーザー端末で同コマンドを実行後、再ログインして再開する。
+- ユーザー端末でグループ追加に成功。再ログイン前のシェルでも `sg docker -c` によりGPUコンテナ確認を完了した。
+
+## 2026-11-18 手順2: NVIDIA公式ComfyUI Playbook
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `gh repo view NVIDIA/dgx-spark-playbooks --json ...` | NVIDIA公式リポジトリとデフォルトブランチを確認できる | `NVIDIA/dgx-spark-playbooks`、デフォルトブランチ `main` を確認 ✅ |
+| `gh repo clone NVIDIA/dgx-spark-playbooks dgx-spark-playbooks` | 公式Playbookを取得できる | 取得成功 ✅ |
+| `git rev-parse HEAD` | 検証対象のコミットを特定できる | `30883150541743d580c9c347700c6ac99fc396d2` |
+| README・`assets/Dockerfile`・起動スクリプトの確認 | 現行のビルド方法、パス、起動方法を特定できる | Dockerfileは `nvidia/playbook-comfyui/assets/Dockerfile`、コンテナ内は `/opt/ComfyUI`、既定CMDは `python main.py --listen 0.0.0.0 --port 8188`。READMEのビルドは `docker build -t comfyui -f assets/Dockerfile .` |
+| `docker buildx imagetools inspect nvcr.io/nvidia/pytorch:26.02-py3` | ベースイメージがARM64対応である | `linux/arm64` digest `sha256:8014e4ffc674ae9cc9aecad04b64b29c3d311ed738e54ac3042d2d45690d19e9` を確認 ✅ |
+| ARM64マニフェストのレイヤーサイズ集計 | 大容量取得前にダウンロード量を把握できる | 圧縮済み合計約9.26 GiB（81レイヤー）。ユーザー承認待ち |
+
+### 現物確認メモ
+- ベースイメージ: `nvcr.io/nvidia/pytorch:26.02-py3`（マニフェストリストdigest `sha256:bbc2b67e2533edd63ff1496bb1ed00a00338cdc1478af6c1a0bf9f4b369977e7`）
+- ComfyUI: タグ `v0.33.2` に固定。
+- カスタムノードは複数導入されるが、各リポジトリのcommitはDockerfile内で固定されていない。無改変検証後の手順4で固定が必要。
+- 公式起動例のポート指定は `-p 8188:8188`。無改変検証でもホスト側は必ず `127.0.0.1:8188:8188` に変更して公開範囲を限定する。
+
+### 無改変ビルド・起動検証
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `docker build -t comfyui -f assets/Dockerfile .` | 公式DockerfileがARM64/DGX Spark上で完走する | 約48分17秒で成功 ✅。イメージID `sha256:51ec5be3fd232c187bf7d67f1da3a4c2f4dd307196e8d17c57e7a93d464d832e` |
+| `docker image inspect comfyui ...` | CMDとイメージ情報を確認できる | CMDは `python main.py --listen 0.0.0.0 --port 8188`、論理サイズ `11,437,749,774` bytes |
+| `docker run -d --name comfyui --gpus all --ipc host --ulimit memlock=-1 -p 127.0.0.1:8188:8188 comfyui` | GPU付きで起動し、ホストのループバックだけに公開される | 起動成功 ✅。`127.0.0.1:8188->8188/tcp` を確認 |
+| `docker logs comfyui` | ComfyUIのready行とGB10認識が確認できる | `Device: cuda:0 NVIDIA GB10 : native`、`Total VRAM 124608 MB`、`ComfyUI version: 0.33.2`、`To see the GUI go to: http://0.0.0.0:8188` を確認 ✅ |
+| `curl http://127.0.0.1:8188/` | HTTP 200 | `HTTP 200` ✅ |
+| Cursor内ブラウザーで `http://127.0.0.1:8188/` を表示 | ComfyUIの操作画面が表示される | 日本語UI、ワークフロー画面、実行ボタン等の表示を確認 ✅ |
+| コンテナ内Git commit採取 | 後続のバージョン固定に必要なcommitを特定できる | 下記commit一覧を採取 ✅ |
+| `docker stop comfyui` | 検証後にコンテナを停止できる | 正常停止 ✅ |
+| `docker system df` / `df -h /` | ビルド後の使用量と残容量を確認できる | Docker Images 36.47GB、Build Cache 35.91GB、ルート空き3.4TB |
+
+### ビルド時点のcommit
+- ComfyUI: `7cee3ceb1a35503172e0dfb8dbdbdedee2aba8aa`
+- ComfyUI-Frame-Interpolation: `26545cc2dd95bc3d27f056016300673bdeee78f5`
+- ComfyUI-KJNodes: `4d6f027c23991aef33698a5c8c57452111df4cdb`
+- ComfyUI-Manager: `3a2177fb2484f086e554145add56dd282a7c5ad4`
+- ComfyUI-VideoHelperSuite: `4d907bee61e92c2e65af3bd6383a4e4d356126d1`
+- ComfyUI_IPAdapter_plus: `a0f451a5113cf9becb0847b92884cb10cbdec0ef`
+- comfyui_HiDream-Sampler: `98ad017cac93b782e2af95411e4c10d493ecb841`
+- comfyui_controlnet_aux: `c2655d2970d810d8a3d71deed204cdf416b66132`
+
+### 起動時に確認した警告・不具合
+- ComfyUI本体とCUDAは正常起動したが、ComfyUI-Managerの事前チェックが `PyTorch is not installed` と誤検知した。その後ComfyUI本体はPyTorch `2.11.0a0+eb65b36914.nv26.02` とCUDAを正常認識。
+- `comfyui_controlnet_aux` は `scikit-image` 不足によりDWPose関連2モジュールのロードに失敗。Dockerfileがカスタムノード依存関係のインストール失敗を `|| true` で無視するため、ビルド自体は成功している。
+- HiDream Samplerは `diffusers` およびモデル未配置の警告あり。今回のUI起動確認やWan検証には影響しないが、HiDream利用前に修正が必要。
+- ComfyUI-Managerは初回起動時に `network_mode: public` で外部キャッシュを更新した。手順4のオフライン化で無効化する。
+
+## 2026-11-18 手順3: Wan 2.2 TI2V-5B（事前調査）
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `gh repo view Comfy-Org/workflow_templates --json ...` | 公式ワークフローリポジトリを確認できる | ❌ `api.github.com` に接続できない |
+| `python3 -c "import huggingface_hub; ..."` | Hugging Face Hub APIの利用可否を確認できる | ❌ `huggingface_hub` はホストに未導入 |
+| `curl -I https://api.github.com` | GitHubへ接続できる | ❌ `Could not resolve host` |
+| `curl -I https://huggingface.co` | Hugging Faceへ接続できる | ❌ `Could not resolve host` |
+| `getent hosts api.github.com huggingface.co` | DNS解決できる | ❌ 解決結果なし |
+| `ip route && resolvectl status` | デフォルトルートとDNSサーバーが存在する | ❌ デフォルトルートなし。全インターフェースのDNSスコープが `none` |
+
+### 停止理由と復旧
+- 現在ホストがネットワークから切断されており、デフォルトルートおよび上流DNSがない。
+- 公式ファイル一覧・サイズの確認、公式ワークフロー取得、モデルダウンロードができないため停止。
+- 有線またはWi-Fiを再接続後、GitHub/Hugging Faceの名前解決を再確認して再開する。
+
+### ネットワーク復旧後の公式情報確認
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `getent hosts ... && curl -I https://huggingface.co` / `ip route` | DNS、HTTPS、デフォルトルートが復旧している | DNS解決、HTTP 200、Wi-Fi経由のデフォルトルートを確認 ✅ |
+| `python3 -m venv hf-env && hf-env/bin/pip install huggingface_hub` | 隔離環境で公式Hub APIを利用できる | `huggingface_hub 2.4.0` を導入 ✅ |
+| `gh repo clone Comfy-Org/workflow_templates workflow_templates` | 公式ワークフローをcloneできる | ❌ 通信待ちのまま約4分進まず中断。空のGit管理ディレクトリのみ残存 |
+| `gh api repos/Comfy-Org/workflow_templates/git/trees/main?...` | 公式5Bテンプレートの実在を確認できる | `templates/video_wan2_2_5B_ti2v.json`、blob `634303feba82471ef3df3356178de4c037ae213e`、15,099 bytesを確認 ✅ |
+| `gh api .../commits/main` / 公式テンプレート本文取得 | テンプレートのrevisionとモデル要件を確認できる | workflow_templates commit `85984c2b1ee8c0aa39179bf122a7d01fa1b21c09`。既定値は1280x704、121フレーム、24fps、20 steps ✅ |
+| `HfApi().list_repo_files('Comfy-Org/Wan_2.2_ComfyUI_Repackaged')` | 配布元の実在ファイルを列挙できる | 5B diffusion model、FP8 text encoder、Wan 2.2 VAEを確認 ✅ |
+| `HfApi().model_info(..., files_metadata=True)` | revision、サイズ、SHA256を取得できる | 下記3ファイルを確認 ✅ |
+
+### 5B公式テンプレートが要求するモデル
+- HF revision: `Comfy-Org/Wan_2.2_ComfyUI_Repackaged@ee6f4a40737a995bf5818954cfce6d59443b0f04`
+- `split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors`
+  - 9,999,658,848 bytes
+  - SHA256 `456f901338bd9eadbded3828b819109a9b68e8a525ca5cf8d0049a69fcfeca1e`
+- `split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors`
+  - 6,735,906,897 bytes
+  - SHA256 `c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68`
+  - テンプレート内URLはWan 2.1リポジトリだが、Wan 2.2リポジトリ内の同名ファイルとサイズ・SHA256が一致することを確認。
+- `split_files/vae/wan2.2_vae.safetensors`
+  - 1,409,400,960 bytes
+  - SHA256 `e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156`
+- 合計: 18,144,966,705 bytes（約16.90 GiB）。大容量取得のユーザー承認待ち。
+
+### モデル取得・検証
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `python3 scripts/download-workflow.py` | commit固定した公式UIワークフローを取得し、Git blobを検証できる | `workflows/video_wan2_2_5B_ti2v.json` を取得。blob `634303feba82471ef3df3356178de4c037ae213e` 一致 ✅ |
+| `hf-env/bin/python scripts/download-models.py`（Xet/CAS） | 3モデルを取得してSHA256を検証できる | ❌ 約16分後、最初のファイルでXet `File reconstruction error`。有効な部分ファイルは残らず |
+| `HF_HUB_DISABLE_XET=1` 相当を反映して再実行 | 通常HTTPSで中断を再開し、3モデルを検証できる | 接続切断・タイムアウト時に自動再開し、約94分56秒で3ファイル完了。サイズ・SHA256すべて一致 ✅ |
+| `curl /models/diffusion_models` 等 | ComfyUIが3モデルを認識する | diffusion model、text encoder、VAEを認識 ✅ |
+
+### 初回生成（公式テンプレート既定値）
+
+| 項目 | 実測値 |
+|---|---|
+| プロンプト | 公式テンプレート既定の一般映像（1970年代風の地下鉄駅で演奏するストリートミュージシャン） |
+| 解像度 | 1280×704 |
+| フレーム数 / FPS | 121 / 24 |
+| Steps / CFG / Sampler / Scheduler | 20 / 5 / `uni_pc` / `simple` |
+| Seed | `898471028164125` |
+| ComfyUI処理時間 | 324.78秒 |
+| API投入から完了まで | 326.37秒 |
+| ホスト統合メモリ最大使用量 | 65,527,050,240 bytes（約61.03 GiB） |
+| ホスト統合メモリ最小Available | 65,133,924,352 bytes（約60.66 GiB） |
+| ComfyUI報告の最小VRAM free | 795,258,368 bytes（UMAのため参考値） |
+| 出力 | `output/video/wan2_2_5B_default_00001_.mp4` |
+| 出力SHA256 | `ada8cc0508c203714e6677060d04659e634301a9944a1e19a78f73fb43bdc786` |
+
+### 出力検証
+- ホストに`ffprobe`がなかったため最初の確認は失敗。公式コンテナ内の`ffprobe`で復旧。
+- H.264 / yuv420p / 1280×704 / 24fps / 121 frames / 5.041667秒 / 1,223,600 bytesを確認 ✅
+- ブラウザーで中央フレームを目視し、一般的な地下鉄駅・ギター演奏者の映像であることを確認 ✅
+- 出力MP4には`prompt`タグとしてAPIグラフとプロンプトが埋め込まれていることを確認。外部公開前のメタデータ削除が必須。
+- ComfyUIログ上のステージ量: Wan text encoder 6419MB、WAN22 9535MB、Wan VAE 1344MB。
+- 完了後に`POST /free`（`unload_models=true`, `free_memory=true`）を実行し、コンテナを停止した。
+
+### 追加した実装
+- `scripts/download-models.py`: revision・サイズ・SHA256固定、HTTPS再開対応。
+- `scripts/download-workflow.py`: workflow_templates commit・Git blob固定。
+- `scripts/test-generate.py`: API投入、完了待機、毎秒メモリ採取、生成ログ保存。
+- `workflows/video_wan2_2_5B_ti2v.api.json`: 公式UIテンプレートと同じ生成条件のAPIグラフ。
+- `models/MANIFEST.md`: 取得元、revision、サイズ、SHA256。
+- 生成詳細: `logs/generations/20261118T071622Z-c779faa3-bf0d-486b-8d8c-5990491f1a86.json`
+
+## 2026-11-19 手順4: バージョン固定・ローカル限定・オフライン化
+
+### 公式設定の確認
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| ComfyUI `v0.33.2`タグをGitHub APIで照合 | タグのcommitを特定できる | `7cee3ceb1a35503172e0dfb8dbdbdedee2aba8aa` ✅ |
+| ComfyUI-Manager固定commitのREADME・実装を確認 | 正式なオフライン設定を特定できる | `network_mode = offline` は外部接続を使わずキャッシュを利用する公式設定と確認 ✅ |
+| 採取済みカスタムノードcommitをGitHub APIで照合 | 各commitが配布元に実在する | 7リポジトリすべて実在。ただしWan 2.2/LTXの公式ワークフローは標準ノードのみで動くため、固定イメージにはManagerだけを残す方針とした |
+
+### 固定イメージとCompose
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `docker compose config --quiet` | Compose構文が妥当 | 成功 ✅ |
+| `docker compose build` | digest・commit固定イメージを構築できる | 約6分20秒で成功 ✅ |
+| イメージ内commit・設定確認 | ComfyUI/Managerのcommitとオフライン設定が一致する | ComfyUI `7cee3ceb...`、Manager `3a2177fb...`、`network_mode = offline` を確認 ✅ |
+| `scripts/start.sh`（internal network版） | 127.0.0.1からUIへ到達できる | ❌ Docker `internal`ネットワークでは公開ポートもホストから到達不可。ログ上はComfyUI正常起動 |
+| internal networkを外して再実行 | 127.0.0.1限定でUIへ到達できる | `HTTP 200`、`127.0.0.1:8188->8188/tcp` ✅ |
+
+固定情報:
+- NGC ARM64 base digest: `sha256:8014e4ffc674ae9cc9aecad04b64b29c3d311ed738e54ac3042d2d45690d19e9`
+- ローカルイメージ: `unbound-comfyui:0.33.2`
+- ローカルイメージdigest: `sha256:6dce758e937019f289543b6727806fe97d87f6787b140ea5641608bd914f9963`
+- 論理サイズ: 11,050,153,924 bytes
+- 起動ログ: `[ComfyUI-Manager] network_mode: offline`
+- Managerによる外部キャッシュ更新ログなし。
+- カスタムノードはManagerのみ。公式Playbookで依存導入に失敗していたHiDream・ControlNet補助等の未使用ノードを除外。
+
+### 完全オフライン受入試験
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `docker network disconnect unbound_engine_default unbound-comfyui` | 実行中コンテナの外部通信を物理的に切断 | `.NetworkSettings.Networks` が空 `{}` ✅ |
+| コンテナ内から`https://huggingface.co`へ接続 | 接続失敗 | `Temporary failure in name resolution` ✅ |
+| 切断状態で公式5B APIワークフローを再投入 | モデル取得なしで動画を再生成できる | 328.33秒で成功 ✅ |
+| Dockerネットワークを再接続 | 通常のローカルUIへ復帰 | `HTTP 200` ✅ |
+
+オフライン出力:
+- `output/video/wan2_2_5B_default_00002_.mp4`
+- H.264 / 1280×704 / 24fps / 121 frames / 5.041667秒
+- 1,219,534 bytes
+- SHA256 `936e17041d27f8c85f1832e2efa4495d75f60ad5b95dc8231fba2099c09c4fb9`
+
+### メタデータ削除
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `scripts/strip-metadata.sh` 初回 | メタデータ削除後にffprobe検証 | FFmpeg処理は成功したが、実行中コンテナ用のffprobeコマンド配列に`ffprobe`が欠けてexit 127 ❌ |
+| コマンド配列修正後、実行中コンテナで再試行 | `prompt` / `workflow`タグがない | 成功 ✅ |
+| ComfyUI停止後に別動画で再試行 | 一時コンテナでも削除・検証できる | 成功し、一時コンテナも`--rm`で残存なし ✅ |
+
+検証済み出力:
+- `output/video/wan2_2_5B_default_00002_stripped.mp4`
+- 保持タグは`major_brand`、`minor_version`、`compatible_brands`、`encoder`のみ。
+- `prompt`および`workflow`タグなし。
+
+### 追加・更新した成果物
+- `Dockerfile`: NGC ARM64 digest、ComfyUI/Manager commit固定。
+- `docker-compose.yml`: `127.0.0.1`限定、GPU、モデルread-only、セキュリティ制約、healthcheck。
+- `config/comfyui-manager.ini`: Managerオフライン・取得/インストール無効。
+- `versions.lock`: Playbook、ベースイメージ、ComfyUI、Manager、モデル、ワークフローを固定。
+- `scripts/preflight.sh`
+- `scripts/start.sh`
+- `scripts/stop.sh`（`POST /free`後に停止）
+- `scripts/collect-logs.sh`
+- `scripts/strip-metadata.sh`
+- `scripts/test-offline.sh`
+- `README.md`
+- 採取ログ: `logs/comfyui-20261118T154018Z.log`
+
+## 2026-11-19 手順5: Wan 14B I2V / LTX-2.5 比較（事前調査）
+
+### Wan 2.2 I2V-A14B
+
+- 公式テンプレート: `templates/video_wan2_2_14B_i2v.json`
+- workflow_templates commit:
+  `85984c2b1ee8c0aa39179bf122a7d01fa1b21c09`
+- 既定値: 640×640相当、5秒、16fps。
+- 通常設定: 20 steps、split 10、CFG 3.5/1。
+- 4-step LoRA設定: 4 steps、split 2。公式テンプレートでは初期状態OFF。
+- 追加で必要なファイル:
+  - high-noise FP8: 14,294,742,832 bytes
+  - low-noise FP8: 14,294,742,832 bytes
+  - high-noise 4-step LoRA: 1,226,977,424 bytes
+  - low-noise 4-step LoRA: 1,226,977,424 bytes
+  - Wan 2.1 VAE: 253,815,318 bytes
+- text encoderは5Bで取得済み。
+- 追加合計: 31,297,255,830 bytes（約29.15 GiB）。
+
+### LTX-2.5
+
+- 公式配布元: `Lightricks/LTX-2.5`
+- revision: `49b093a39c19169a8a81721dcc541e07e945232f`
+- 公式ローカルI2Vテンプレート:
+  `templates/video_ltx2_5_i2v.json`
+- 既定値: 1280×720、5秒、24fps、prompt enhancerはOFF。
+- 必要ファイル:
+  - distilled transformer INT8: 21,504,034,224 bytes
+  - Gemma 4 12B text encoder INT8: 15,372,969,374 bytes
+  - video VAE BF16: 1,472,223,346 bytes
+  - audio VAE BF16: 364,866,540 bytes
+  - spatial latent upscaler: 995,778,752 bytes
+- 合計: 39,709,872,236 bytes（約36.98 GiB）。
+- gated repository。現在のホストはHugging Faceへ未ログイン。
+- 固定ComfyUI 0.33.2とのノード互換性を`/object_info`で照合し、
+  `MarkdownNote`以外の全ランタイムノードが存在することを確認。
+
+### ライセンス確認
+
+- LTX-2.x Community License Agreement原文（2026-10-29改定）を確認。
+- 年間売上1,000万米ドル以上のEntityは、非商用目的を除く利用に有償契約が必要。
+- 2026-11-03版Acceptable Use Policy原文も確認。
+- AUPは性的に露骨なコンテンツ、性的行為、性的フェティッシュ・
+  ファンタジーの生成を明示的に禁止する。
+- コンテンツ来歴情報や電子透かし等の除去・妨害も禁止。
+- 詳細を`docs/licenses.md`へ記録。
+- LTX-2.5は一般映像の比較に限定し、本プロジェクトが当初想定する
+  性的に露骨な用途には使用できない。
+
+### ダウンロード前の状態
+
+- Wan 14BとLTX-2.5の追加合計:
+  71,007,128,066 bytes（約66.13 GiB）。
+- LTX-2.5はHugging Face上で利用条件への同意と`hf auth login`が必要。
+- 大容量取得およびLTXライセンス同意についてユーザー確認待ち。
+
+## 2026-11-19 手順5: Wan 14B I2V 4-step LoRA
+
+### モデル・公式ワークフロー取得
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `hf-env/bin/python scripts/download-models.py wan14` | Wan 14B FP8 high/low、4-step LoRA high/low、VAEを固定revisionから取得し検証 | 約7,162秒で5ファイル取得、サイズ・SHA256一致 ✅ |
+| `hf-env/bin/python scripts/download-workflow.py wan14 ltx25` | 固定commitから公式ワークフローと入力画像を取得 | Wan/LTXのJSON・入力画像計4ファイルでGit blob一致 ✅ |
+| Wan 14B 5ファイルを`sha256sum`で再検証 | downloader記載値と一致 | 5ファイルすべて一致 ✅ |
+| `python3 scripts/prepare-comparison-workflows.py` | 両モデルを同じ入力・プロンプト・640×640・5秒・16fps・seedに固定 | `compare_wan14_4step_i2v.json`と`compare_ltx2_5_i2v.json`を作成 ✅ |
+| `hf-env/bin/hf auth whoami` | LTX取得に必要なログインを確認 | `Not logged in`。LTX-2.5取得は認証待ち |
+
+Wan 14B追加資産:
+- high/low FP8 scaled: 各14,294,742,832 bytes
+- high/low LightX2V 4-step LoRA: 各1,226,977,424 bytes
+- Wan 2.1 VAE: 253,815,318 bytes
+- 追加合計: 31,297,255,830 bytes
+- 全サイズ・SHA256を`models/MANIFEST.md`へ記録。
+
+### 生成時の復旧記録
+
+1. 最初のキュー投入では4-stepフラグの配列位置を1つ誤り、通常20-stepの
+   ままだった。約47秒で`POST /interrupt`し、出力前に中断。
+2. 正しいフラグ（上位subgraph node 129の`widgets_values[11]`）で再投入。
+   生成自体は102.738秒で成功したが、計測スクリプトが相対パスに
+   `Path.relative_to()`を直接適用して終了時に失敗。パスを`resolve()`して修正。
+3. `POST /free`でモデルを解放後、同じ設定を再実行して生成・計測とも成功。
+4. 中断ステータスで計測が終了しない問題も、`status_str == error`を終端として
+   扱うよう修正。
+
+### Wan 14B 4-step実測
+
+| 項目 | 実測値 |
+|---|---|
+| 入力 | 公式`video_wan2_2_14B_i2v_input_image.jpg` |
+| プロンプト | 公式テンプレート既定の一般映像（白いドラゴン戦士） |
+| 解像度 | 640×640 |
+| フレーム数 / FPS / 長さ | 81 / 16 / 5.0625秒 |
+| Steps / split | 4 / 2（high/low LightX2V LoRA） |
+| Seed | `264244520398999` |
+| ComfyUI execution時間 | 100.352秒 |
+| 計測開始から完了まで | 98.157秒（キュー投入後に計測開始） |
+| ホスト統合メモリ最大使用量 | 92,026,261,504 bytes（約85.71 GiB） |
+| ホスト統合メモリ最小Available | 38,634,713,088 bytes（約35.98 GiB） |
+| ComfyUI報告の最小VRAM free | 5,642,219,520 bytes（UMAのため参考値） |
+| 出力 | `output/video/compare_wan14_4step_00002_.mp4` |
+| 出力SHA256 | `9edc13e7ea82b5952cd4f73b17506b2998b0d9185fd3732c5520477794240e5d` |
+
+出力検証:
+- H.264 / 640×640 / 16fps / 81 frames / 5.0625秒 / 718,617 bytes ✅
+- ブラウザーで目視し、白いドラゴン戦士の一般映像であることを確認 ✅
+- 生成ログ:
+  `logs/generations/20261118T175342Z-5db23a7d-4f12-48b8-b490-0b0bb4c66a9f.json`
+
+## 2026-11-19 手順5: LTX-2.5 I2Vと同条件比較
+
+### 認証・モデル取得
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `hf auth login --force`＋ブラウザーDevice Authorization | CLIをHugging Faceへ安全に認証 | ユーザー`otooth`として認証成功 ✅ |
+| LTX-2.5の`Agree and Access` | gated repositoryへのアクセスを有効化 | 情報共有・利用条件に同意しアクセス成功 ✅ |
+| `hf auth whoami`と`HfApi.model_info()` | CLI認証と固定revisionへのアクセスを確認 | `otooth`、revision `49b093a...`、gated=`auto`を確認 ✅ |
+| `hf-env/bin/python scripts/download-models.py ltx25` | 5ファイルを取得しサイズ・SHA256検証 | 8,764秒（約2時間26分）で成功、5ファイルすべて一致 ✅ |
+
+ダウンロード中、21.5GB Transformerと15.4GB Text Encoderで
+接続切断・read timeoutが計10回発生した。HTTPS Rangeによる自動再開が機能し、
+既取得部分を保持して完走した。取得合計は39,709,872,236 bytes。
+
+### ワークフロー復旧記録
+
+1. 公式テンプレートはPrompt EnhancerがOFFでも、未取得の任意Enhancerモデル名を
+   combo入力として検証し、`Value not in list`で投入を拒否した。
+   未使用値を取得済みLTX Text Encoder名へ変更し、EnhancerはOFFのまま維持。
+2. 初回生成は成功したが1280×704だった。上位subgraphの640×640値より、
+   接続された`ResolutionSelector`（16:9・0.9MP）が優先されていたため。
+3. `ResolutionSelector`を`1:1 (Square)`・0.4MP・multiple 32へ変更し、
+   実出力640×640を確認して比較対象とした。
+
+### LTX-2.5実測
+
+| 項目 | 実測値 |
+|---|---|
+| 入力・プロンプト・Seed | Wan 14B比較と同一 |
+| 解像度 | 640×640 |
+| フレーム数 / FPS / 長さ | 81 / 16 / 5.0625秒 |
+| Prompt Enhancer | OFF |
+| ComfyUI execution時間 | 45.686秒 |
+| 計測開始から完了まで | 57.746秒 |
+| ホスト統合メモリ最大使用量 | 99,614,146,560 bytes（約92.77 GiB） |
+| ホスト統合メモリ最小Available | 31,046,828,032 bytes（約28.91 GiB） |
+| ComfyUI報告の最小VRAM free | 2,538,950,656 bytes（UMAのため参考値） |
+| 出力 | `output/video/compare_ltx2_5_i2v_00002_.mp4` |
+| 出力SHA256 | `0cc39706e65efde13c02b5cfa8db9de3db9895c67a4fc6b233ee5d2da19736eb` |
+
+出力検証:
+- H.264 / 640×640 / 16fps / 81 frames / 5.0625秒 / 680,252 bytes ✅
+- AAC / 48kHz / stereo / 5.05秒の同期音声を含む ✅
+- ブラウザーで白いドラゴン戦士の一般映像を目視確認 ✅
+- LTXの来歴情報を保護するため、メタデータ削除は実行していない。
+- 生成ログ:
+  `logs/generations/20261118T203607Z-6aa44173-85f8-425d-a345-c5eda160120d.json`
+
+### 同条件比較結果
+
+- LTX-2.5: 45.686秒、Wan 14B 4-step: 100.352秒。
+- LTX-2.5はComfyUI execution時間で約2.20倍高速。
+- ピーク統合メモリはLTX-2.5が約7.07 GiB多い。
+- LTX-2.5のみ同期音声を生成。
+- 両方とも同じ入力・プロンプト・Seed・640×640・81 frames・16fpsで成功。
+- 単一サンプルのため、画質優劣の一般化は行わない。
+- 完了後に`POST /free`でモデルを解放し、ComfyUIを停止。
+- 採取ログ: `logs/comfyui-20261118T203828Z.log`
+
+## 2026-11-19 手順6: Ollama → ComfyUI → FFmpeg自動化
+
+### 公式APIとローカル環境確認
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| Ollama公式`/api/generate`仕様確認 | structured outputと`keep_alive: 0`の現行仕様を確認 | JSON Schema指定と即時アンロードが公式仕様に存在 ✅ |
+| ComfyUI公式Server API仕様確認 | `/prompt`、`/history/{id}`、`/free`の現行仕様を確認 | 3ルートすべて公式資料に存在 ✅ |
+| `ollama list` / `/api/version` / `/api/ps` | 利用可能なQwenと初期アンロード状態を確認 | Ollama 0.40.3、`qwen3.6:35b-a3b-q8_0`、loaded modelsなし ✅ |
+| FastAPI専用venv構築 | ARM64上で固定依存を導入 | FastAPI 0.165.0、Uvicorn 0.54.0ほか全依存を固定 ✅ |
+
+### 実装
+
+- `automation/app.py`
+  - loopback限定FastAPIから`POST /jobs`を受付。
+  - 単一worker queueでジョブを逐次実行。
+  - QwenへJSON Schema付きでショット設計を依頼。
+  - Ollamaを`keep_alive: 0`でアンロードしてからComfyUIを実行。
+  - ComfyUI `/free`を工程間と終了時に実行。
+  - SQLite `data/jobs.sqlite3`へジョブ、計画、イベント、失敗を記録。
+  - WanはFFmpegでメタデータを除去。LTXはAUP上の来歴情報保護のため
+    remuxせず原本を保持し、1ショットだけ許可。
+- 公式UI workflowを固定frontendでAPI JSONへ変換:
+  - `workflows/compare_wan14_4step_i2v.api.json`
+  - `workflows/compare_ltx2_5_i2v.api.json`
+- `scripts/start-api.sh` / `scripts/stop-api.sh`
+- `requirements-automation.txt`
+- `docs/troubleshooting.md`
+
+### 受入試験と復旧
+
+| コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `scripts/start-api.sh` | ComfyUIとAPIをloopback限定で起動 | `127.0.0.1:8188` / `127.0.0.1:8001`で正常起動 ✅ |
+| 一般映像のWan 14Bジョブを`POST /jobs` | Qwen計画→アンロード→動画生成→FFmpeg→履歴保存 | 初回は動画計算後、SaveVideoでpermission denied ❌ |
+| ジョブディレクトリへ通常DAC書込権限を付与して再試験 | Capabilityを全削除したコンテナでも保存可能 | 全工程115.98秒で成功 ✅ |
+| `/api/ps` | 動画生成後にOllamaモデルが残らない | `{"models":[]}` ✅ |
+| LTX 2ショット要求 | 来歴情報を壊す結合を拒否 | HTTP 422で拒否 ✅ |
+
+初回失敗原因:
+- FastAPIがホスト所有775でジョブディレクトリを作成した。
+- コンテナは`cap_drop: ALL`のため、UID 0でも`CAP_DAC_OVERRIDE`がなく書込不能。
+- ジョブ専用ディレクトリだけを0777にし、モデル・設定・他ディレクトリの
+  read-only制約は維持した。
+
+成功ジョブ:
+- Job ID: `6ab3dcac-56f7-43f6-b5dd-298fec6fb9da`
+- Qwen計画: 約11.33秒
+- 最終出力:
+  `output/jobs/6ab3dcac-56f7-43f6-b5dd-298fec6fb9da/final.mp4`
+- H.264 / 640×640 / 16fps / 81 frames / 5.0625秒 / 615,810 bytes
+- SHA256:
+  `28e720538899502560d2fe24d95416be05a7aac1fd9ccb19c2bfae203af1f613`
+- `prompt` / `workflow`タグなし。一般的な白いドラゴン戦士の映像を目視確認 ✅
+- 構文、IDE lint、`pip check`に問題なし。8001/8188がともに
+  `127.0.0.1`限定であることを`ss`で確認 ✅
+- 受入完了後、APIを終了し、ComfyUIを`POST /free`後に停止。
+
+## 2026-11-19 日本語Web UI
+
+- `http://127.0.0.1:8001/`に通常利用者向けの1画面UIを追加。
+- 日本語プロンプト、Wan/LTX選択、ショット数、既存画像選択、
+  20MB以下のPNG/JPEG/WebPアップロード、Seed指定に対応。
+- ジョブ進捗、工程イベント、失敗理由、最近の履歴、完成MP4再生を表示。
+- アップロードは拡張子、容量、ファイルシグネチャを検証し、
+  ランダム化した安全なファイル名で`input/`へ保存。
+- 出力配信は`output/`配下のMP4だけに制限し、Range request（HTTP 206）を確認。
+- LTX選択時は1ショットに固定し、ライセンス/AUP確認欄を表示。
+- 過去の成功ジョブをUIから開き、動画再生と全工程表示を目視確認 ✅
+- 追加依存`python-multipart==0.0.34`を固定し、`pip check`成功。
+
+## 2026-11-19 Unbound Engineロゴ
+
+- コンセプト: 開いた軌道＝制約からの解放、中央の発光コア＝生成エンジン、
+  紫からシアンのグラデーション＝既存UIと動画生成の動き。
+- 32pxでも識別できる文字なしのベクターマークとして
+  `automation/static/logo.svg`を作成。
+- Web UIのヘッダーロゴ、ブランド名、SVG faviconへ設定。
+- 透明背景、ダークUI、レスポンシブ表示をブラウザーで確認 ✅
+
+## 2026-11-19 プロンプト追従不良の原因調査と修正
+
+対象入力:
+
+`An old woman is trading blows with a muscular man.`
+
+### 原因
+
+1. UIが既存の`neon_cyborg_portrait.png`を開始画像として自動選択していた。
+2. 選択されたWan 14BはI2Vモデルであり、文章より開始画像の人物、
+   サイバーパンクの服装、背景を強く維持した。
+3. Qwenによる補強が`trading blows`の相互・反復動作を単発攻撃へ
+   弱める場合があった。
+4. Wan 5Bへ短い原文だけを渡した試験では画像由来の要素は消えたが、
+   複数人物の同時表示と相互動作が不安定だった。
+
+### 修正
+
+- 文章から生成するWan 2.2 5Bを自動化APIへ追加し、UIの既定モデルにした。
+- Wan 14B/LTX-2.5の開始画像を必須かつ未選択状態に変更し、
+  人物・服装・背景が強く引き継がれる旨を表示した。
+- プロンプト補強を既定ONにし、人物数、年齢、性別、体格、主要動作を
+  変更しないようQwenのsystem promptを厳格化した。
+- 複数人物ではmedium-wide/wide shotで全員を同時表示し、
+  `trading blows`は双方が繰り返しパンチと防御を行い、
+  単発攻撃や組技へ変更しない制約を追加した。
+- 補強をOFFにした場合は入力文を改変せず動画モデルへ渡すようにした。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `POST /jobs`（Wan 5B、補強OFF、対象入力） | 画像の影響なしで文章から生成 | サイバーパンク要素は消えたが、女性が隠れ、組技に近い構図になった |
+| `POST /jobs`（Wan 5B、厳格補強ON、対象入力） | 高齢女性と筋肉質男性を同時表示し、相互の打撃を生成 | Job `e359db17-0bb3-434f-91ce-251841400ec3`が約93秒で成功 ✅ |
+| ブラウザーで1.0秒、2.5秒、4.5秒を目視確認 | 指定人物、非サイバーパンク、打撃姿勢を維持 | 白髪の高齢女性と筋肉質男性が全時点で同時に映り、互いに構えて打ち合う動作を確認 ✅ |
+
+最終出力:
+
+`output/jobs/e359db17-0bb3-434f-91ce-251841400ec3/final.mp4`
+
+改善は確認できたが、生成モデルであるため、複雑な二人の接触動作や
+拳・腕の形状をフレーム単位で完全に保証するものではない。
+
+## 2026-11-19 Wan Animate 2: 三面図キャラクター動画
+
+### 公式仕様と固定
+
+- 実行コマンド: ComfyUI公式ドキュメント
+  `tutorials/video/wan/wan-animate-2`と公式workflow templateを確認。
+- 期待結果: 参照キャラクター画像と動作元動画を直接入力できる公式構成を確認。
+- 実際の結果: `WanAnimate2ToVideo`が外見、表情、身体・手の動きを転写し、
+  ComfyUI 0.36.0以上を必要とすることを確認 ✅
+- workflow_templates commit:
+  `85984c2b1ee8c0aa39179bf122a7d01fa1b21c09`
+- UI workflow blob:
+  `b2771d09110f00a5ab9690df23b118dc695f129b`
+- ComfyUIを0.45.0 / commit
+  `989d93d0d968e704c589ce0146bb18c77f6b50cc`へ更新。
+- 公式frontendの`app.graphToPrompt()`でAPI形式へ変換し、
+  比較表示だけの枝を除いた固定workflowを
+  `workflows/video_wan_animate2_distilled.api.json`へ保存。
+- API workflow SHA256:
+  `8238e977ee851040a7d97cb5aab94e8c69ea0672b6b6aaedfe8677c98bb8c046`
+
+### モデル取得
+
+- 実行コマンド:
+  `hf-env/bin/python -u scripts/download-models.py animate2`
+- 期待結果: revision固定した必要モデルだけを取得し、サイズとSHA256を検証。
+- 実際の結果: 約61分56秒で18,171,201,202 bytesを取得し、3ファイル
+  すべて検証成功 ✅
+- Diffusion:
+  `d2e566ecac3f164cb1a6b63dc7d868d6678c9affa49fbceb3abe4f9458f89c8a`
+- CLIP Vision:
+  `64a7ef761bfccbadbaa3da77366aac4185a6c58fa5de5f589b42a65bcc21f161`
+- VAE:
+  `1ab9a32cc2c740f6e39d80d367ce5dcc28db8c71b79b28670546b8973e9d75f9`
+- text encoderは既存Wan 2.2の固定ファイルを再利用。
+
+### 実装
+
+- 日本語UIへ`Wan Animate 2 — 三面図のキャラを動かす`を追加。
+- 横並び三面図について、正面図の位置を左・中央・右から選択し、
+  ブラウザーのCanvasで該当する3分の1だけをPNGへ切り出す。
+- 画像が最初から1人の場合は「切り出さない」に対応。
+- MP4動作元動画を250MBまでアップロード可能。拡張子、容量、
+  MP4 `ftyp`シグネチャを検証し、ランダム名で保存。
+- 動作動画を省略した場合はWan 5Bで81フレームの動作下書きを生成し、
+  `/free`で解放してからWan Animate 2へ逐次切替。
+- 参照画像、動作動画、文章prompt、seedを固定API workflowへ設定。
+- Wan出力としてFFmpegでメタデータを再エンコードなしで除去。
+
+### 構築時の失敗と復旧
+
+- 初回Docker buildはGitHub clone中のHTTP/2切断で失敗。
+- 全履歴cloneをcommit指定の`git fetch --depth 1`へ変更し、再構築成功。
+- NGCベースの`datasets`とComfyUIのTransformersが要求する
+  Hugging Face Hub範囲を`1.33.0`へ固定。
+- 未使用の`spin` CLIが新しいClickと競合したためコンテナから除去。
+- 最終`pip check`: ホスト自動化環境・コンテナとも問題なし ✅
+- 最終イメージ:
+  `unbound-comfyui:0.45.0`
+- digest:
+  `sha256:cf7891cfd2d3e048551d7598e11a5ee573cdd28f596056bfcb64b1bbcae9b078`
+
+### 受入試験
+
+動作動画アップロード経路:
+
+- Job ID: `21cf6cc0-ca5c-4897-8425-436da058ea56`
+- 入力: 公式の一般的なピンク髪キャラクター画像と短いダンス動画。
+- 期待結果: 参照キャラクターの外見を維持して動作を転写。
+- 実際の結果: 約341.6秒で成功。ピンク髪、黒と金の衣装を維持し、
+  ダンス姿勢へ変化することを中間フレームで目視確認 ✅
+- 出力: H.264 / 480×832 / 24fps / 81 frames / 3.375秒。
+
+文章からの自動動作経路:
+
+- 初回は動作下書き保存先を作成する順序が遅く、
+  capability削除済みコンテナがディレクトリを作れず失敗。
+- ジョブ開始時に0777の専用出力ディレクトリを作成するよう修正。
+- Job ID: `71f38878-10f9-46f5-b6bc-e64a94af2b50`
+- 期待結果: Wan 5B動作下書き→解放→Animate 2を自動実行。
+- 実際の結果: 動作下書き約74.3秒、全工程約411.6秒で成功 ✅
+- 出力: H.264 / 480×832 / 16fps / 81 frames / 5.0625秒。
+- 中間フレームでピンク髪、黒と金の衣装、機械腕を維持し、
+  指定した片手を振る姿勢を目視確認 ✅
+
+UI検証:
+
+- 4584×2736の模擬横三面図から中央を選択。
+- 期待結果: 1面だけを適切な上限サイズへ切り出す。
+- 実際の結果: 858×1536 PNGへ切り出し成功 ✅
+- 動作MP4のmultipart upload、履歴表示、進捗`motion`段階を確認 ✅
+- API/ComfyUIは引き続き`127.0.0.1`限定。
+
+## 2026-11-19 動画追従不良の再調査と調整
+
+### 原因
+
+- Job `468a3703-3eda-4db5-a0c6-c2a55a874649`の入力は
+  256×1024の細長いキャラクター切り出しだった。
+- Animate workflowの480×832中央クロップにより上下が大きく欠け、
+  完成動画は顔の接写になって全身動作が見えなかった。
+- ひとつ前の入力には別ビュー、詳細図、文字が混在し、単一の
+  キャラクター参照として成立していなかった。
+- 自動動作動画にも完成映像用promptをそのまま渡していたため、
+  動作だけでなく別キャラクターと背景まで生成していた。
+- 全ジョブで同一Seedが初期入力され、失敗構図を再生成しやすかった。
+
+### 修正
+
+- 参照画像をモデルと同じ480:832比率のキャンバスへ`contain`配置し、
+  全身を切らずに余白で補正するようにした。
+- 元画像の上端背景色を余白色に使い、切り出し境界を目立ちにくくした。
+- 切り出し結果のプレビュー、横位置、切り出し幅の調整を追加した。
+- 完成映像promptと動作promptを分離。動作側は外見、動物種、服装、
+  背景を除外した全身の中立的performer、固定カメラとして生成する。
+- Animate本体のpromptへ全身、固定カメラ、no zoom/no close-upを追加。
+- Seedは空欄を既定とし、生成時に毎回ランダム化するようにした。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `POST /jobs`（Wan Animate 2、白いうさぎ、動作動画なし） | 全身参照を維持し、専用動作ガイドから両腕を振るダンスを転写 | Job `665cb2e4-1b57-4761-8084-a8832d82346a`が約420.6秒で成功 ✅ |
+| 0.5秒、2.5秒、4.5秒をブラウザーで目視 | 顔の接写ではなく全身と動作変化を表示 | 全身、両脚、左右の腕の位置変化を確認。従来の接写問題は解消 ✅ |
+| `python3 -m py_compile automation/app.py` | Python構文エラーなし | 成功 ✅ |
+| `automation-env/bin/python -m pip check` | 依存関係エラーなし | `No broken requirements found.` ✅ |
+| `ss -ltn` | API/ComfyUIがloopback限定 | `127.0.0.1:8001`、`127.0.0.1:8188`のみ ✅ |
+
+今回のうさぎ元画像自体は、頭の左右と腕が切れた細い画像であるため、
+終盤に境界と手足の変形が残った。これはpromptでは復元できない。
+元の三面図を再アップロードし、プレビューで頭・両腕・両脚が欠けない
+幅へ広げるか、正面の単一全身画像を使う必要がある。公式
+`WanAnimate2ToVideo`は参照画像の先頭1枚だけを使うため、三面図3枚の
+同時参照、非人型キャラクター、複雑な接触動作には引き続き限界がある。
+
+## 2026-11-19 LTX-2.5送信エラーの修正
+
+- 実行コマンド: 直近ジョブ、APIログ、同じ`POST /jobs`入力を確認。
+- 期待結果: LTX生成処理または入力検証のどちらで失敗したかを特定。
+- 実際の結果: 直近3回はすべて動画処理前のHTTP 422で、
+  `ltx_license_acknowledged=false`が原因だった。LTXモデルの実行エラー
+  ではないことを確認。
+- 修正: LTX選択時の確認欄を「必須」と明示し、未確認なら画像アップロード
+  やAPI送信より前に日本語で案内して停止するようにした。
+- ブラウザー試験: 未チェックで「動画を生成」を押す。
+- 期待結果: 不要な画像アップロードやHTTP 422を発生させず、操作方法を表示。
+- 実際の結果:
+  `LTX-2.5を使用するには、下の必須ライセンス確認欄をチェックしてください。`
+  と表示し、API送信前に停止 ✅
+
+## 2026-11-19 三面図3ファイル入力
+
+- 実行コマンド: Wan Animate 2画面を開き、入力欄とAPI schemaを確認。
+- 期待結果: 正面・側面・背面を個別登録し、生成に使う面を選択できる。
+- 実際の結果: 3つの選択・アップロード欄と
+  「今回の生成に使用する面」を追加し、画面表示を確認 ✅
+- 実装: 3画像を480:832へ個別に余白補正して保存し、
+  `reference_front`、`reference_side`、`reference_back`としてジョブへ記録。
+  選択した1面をWan Animate 2の`reference_image`へ渡す。
+- DB migration: 既存ジョブを維持したまま3列を追加し、API応答で確認 ✅
+- 構文・依存: `python3 -m py_compile automation/app.py`、
+  `automation-env/bin/python -m pip check`ともに成功 ✅
+
+公式`WanAnimate2ToVideo`は`reference_image[:1]`だけを使用するため、
+3枚を同時合成・同時参照はしない。横に結合すると3人として誤認するので、
+動作開始時の向きに合う1面を選ぶ方式とし、この制約をUIへ明記した。
+
+## 2026-11-19 画質優先・可逆保存モード
+
+- UIへ「標準・高速」「画質優先」の切替ボタンを追加。
+- 画質優先ではモデル別に生成解像度を上げ、`CreateVideo`を8-bit
+  sRGB / 4:4:4 / tensor維持、`SaveVideo`をH.264 CRF 0へ設定。
+- 完全なraw無圧縮ではなく、生成画素を劣化させない可逆圧縮MP4とした。
+  ブラウザー再生互換性を保ちながら容量を抑えるため。
+- Wan 5B: 1280×704 / 121 frames / 24fps / 20 steps。
+- Wan 14B: 704×704、LTX-2.5: 0.5MP、Wan Animate 2: 576×992。
+- `quality_mode`をDBとAPIへ追加し、履歴カードにも表示。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| UIの「画質優先」から一般的な風車映像をWan 5Bで生成 | 高解像度・可逆保存で完了 | Job `e2d8b23d-d101-4407-a37a-2a1c876c6c71`が約321秒で成功 ✅ |
+| コンテナ内`ffprobe` | 1280×704、24fps、121 frames、4:4:4 H.264 | High 4:4:4 Predictive / `yuv444p` / 39,250,228 bytes ✅ |
+| ブラウザー動画要素を確認 | CRF 0 MP4をエラーなく再生 | duration 5.041667秒、readyState 4、errorなし ✅ |
+| `python3 -m py_compile automation/app.py` / `pip check` | 構文・依存エラーなし | 成功 ✅ |
+
+画質優先は標準モードより生成時間、統合メモリ、保存容量を多く使う。
+元画像や生成モデル自体にない細部を復元する超解像処理ではない。
+
+## 2026-11-20 10秒・15秒動画の連続生成
+
+### 原因
+
+従来の`shots=2/3`は、約5秒の動画を独立したSeedと初期状態で複数生成し、
+最後にMP4を単純連結していた。そのため各境界で構図と動作がリセットされた。
+
+### 修正
+
+- Wan 5B / Wan 14Bで、各区間の終端フレームをFFmpegで抽出。
+- 抽出画像を次区間の`start_image`へ接続し、同じ状態から続きを生成。
+- Qwen計画へ「1つの連続テイク」「リセット、カット、瞬間移動、
+  開始ポーズ反復、被写体・背景・照明・カメラ変更なし」を追加。
+- UIの「ショット数」を「動画の長さ」へ変更し、約10秒・約15秒を
+  「連続生成」と明記。
+- 内部継続フレームは一般の参照画像一覧から除外。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| Wan 5B / 2区間で一般的な青いボールの動画を生成 | 第1区間の終端を第2区間へ引き継ぐ | Job `9b287c05-e77f-4f4a-892c-3543dc24c26c`が約158秒で成功 ✅ |
+| ジョブイベントを確認 | 区間1→終端抽出→区間2の順に処理 | `continuing: Passing segment 1 end frame to segment 2`を確認 ✅ |
+| 完成MP4をブラウザーで確認 | 約10秒の単一動画として再生 | duration 10.125秒、readyState 4 ✅ |
+| 5.00秒と5.15秒を目視比較 | 境界で初期場面へ戻らない | 同じ白い床、カメラ、青いボール位置を維持 ✅ |
+| 6.00秒を目視確認 | 接続後も動作を継続 | 同じ場面内でボールの移動を確認 ✅ |
+
+開始画像の引継ぎでハードリセットは解消するが、生成モデルの性質上、
+長時間では形状や細部が徐々に変化する可能性は残る。
+
+## 2026-11-20 動画生成キャンセル
+
+### 実装
+
+- 実行中ジョブ画面へ「生成をキャンセル」ボタンを追加。
+- `POST /jobs/{job_id}/cancel`を追加し、ジョブ状態を`cancelled`へ更新。
+- 実行中の対象ジョブだけComfyUI `/interrupt`を呼び出す。
+- 待機中ジョブのキャンセルでは、別の実行中ジョブを停止しない。
+- 計画、動作下書き、各連続区間、仕上げの境界でもキャンセル状態を確認。
+- キャンセル後はOllamaとComfyUIモデルを解放し、部分出力を完成扱いにしない。
+- 履歴へ「キャンセル済み」を表示し、次の生成ボタンを再度有効化。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 実行中の一般的な紙飛行機ジョブへ`POST /cancel` | ComfyUIを中断して`cancelled`になる | Job `12931d49-2ab6-447e-bc08-94d6efb60f03`を中断、outputなし ✅ |
+| キャンセル後に`/queue`とOllama `/api/ps`を確認 | キューとモデルが残らない | `queue_running: []`、`models: []` ✅ |
+| UIから一般的な雲の生成をキャンセル | ボタンが「キャンセル中…」を経て履歴へ反映 | Job `0d5da44e-b5ad-48b7-bead-7dcf29420394`が「キャンセル済み」になり再生成ボタン復帰 ✅ |
+| 実行中Aの後ろに待機Bを投入し、Bだけキャンセル | Aを中断しない | B `df39c21f-610d-4c18-9dd5-87e4929dd590`のみ取消、Aは引き続き`generating` ✅ |
+| 続けてテスト用Aもキャンセル | 全テスト終了後に資源解放 | ComfyUIキュー空、Ollamaモデルなし ✅ |
+
+切替時に古いAPIプロセスがPIDファイルと不一致で残っていることも検出した。
+既存ユーザー生成の完了を待ってから重複プロセスを停止し、キャンセルAPIを
+含む単一プロセス（PID 3103980）へ統一した。
+
+## 2026-11-20 履歴（動画ログ）削除機能
+
+- `DELETE /jobs/{job_id}` を追加。完了・失敗・キャンセル済みのみ削除可能（実行中・待機中は409）。
+- 削除対象: `jobs`/`events` 行、`output/jobs/<job_id>/`、`input/continuation-<job_id>-*.png`、`input/motion-guide-<job_id>.mp4`。アップロード済み参照画像は残す。
+- UI: 履歴カードと結果表示に「削除」ボタン（確認ダイアログ付き）。
+- APIを単一プロセス（PID 3160200）で再起動（ComfyUIキュー空を確認後）。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `py_compile` / `pip check` / ReadLints | エラーなし | すべて問題なし ✅ |
+| 一般的な紙の舟ジョブ（wan5b, 1ショット）実行中に`DELETE` | 409 | `Cancel the job before deleting it` HTTP409 ✅ |
+| 不正ID・存在しないUUIDへ`DELETE` | 404 | 両方 HTTP404 ✅ |
+| 完了後に`DELETE /jobs/b70df0fd-49d2-4799-a666-39dd72f4dffb` | DB行と出力が消える | HTTP200、`output/jobs/<id>`消滅、jobs 0件・events 0件、GETは404 ✅ |
+| 既存ジョブ一覧の確認 | ユーザーの既存ジョブは残る | 直近3件（succeeded）そのまま ✅ |
+
+## 2026-11-20 指示追従の改善（工程保持・区間割当・14B精度優先）
+
+- プランナーを「scene（開始状態）＋順序付き steps」に変更。依頼文を句点・`→`・`その後`・`then` 等で節に分割し、節が2つ以上なら Qwen に同数・同順の steps を返させる（工程の欠落・結果状態からの開始を防止）。
+- Qwen の2回目呼び出しで「欠落・順序・scene が後の結果を示していないか」を監査し、不合格なら1回再生成。未解決なら進捗に警告。
+- steps を区間へ順に割当て、各区間プロンプトに「完了済みの工程」と「この区間の工程のみ」を記述。
+- 開始画像ありのエンジンでは外見・構図を Qwen に書かせず固定文を使い、ネガティブにカット・転場・急ズーム・顔の変化を追加。
+- Wan 14B「動作精度優先」: 公式テンプレートのスイッチ `129:131=false`（20ステップ・CFG 3.5・LightX2V LoRAなし）。追加ダウンロードなし。
+- UI: 14B選択時のみ精度優先チェック、進捗に `工程:` 行、履歴に「精度優先」。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 旧方式プランナーで竜の戦士3工程（14B精度優先・2区間, Job `9529bf2b-…`） | 3工程が残る | ❌ 工程1「剣を掲げる」が scene に移され欠落、監査も scene 不合格。構図指定の衝突で脚のアップへのカット、終盤に顔が人間化。1,478秒、ピーク 63,429 MiB |
+| 節固定方式で同じ依頼を `create_plan` 単体実行 | 3節→3工程 | 工程1〜3がすべて順に残り、監査合格 ✅ |
+| 猫3節（T2V）を単体実行 | 監査の誤検出なし | 初回は静止姿勢を「結果状態」と誤判定 → 監査基準を修正後は合格 ✅ |
+| 竜の戦士 14B精度優先・2区間（Job `0571a204-19d9-41d0-9cc5-87d6681586a2`） | 掲げる→突き立てる→片膝の順、カット・顔変化なし | 掲げる・下ろす・片膝の順に出現、竜の外見を維持、脚アップのカットなし ✅。各区間約12分 |
+| バラ（状態変化あり）Wan 5B・2区間（Job `d57ed266-2b0b-4951-b467-920382668a78`） | 抜く→胸に抱える→窓を開けるの順 | 工程3件が順に表示・映像も順序どおり ✅。約2分40秒 |
+| 2本連続実行中のピークメモリ | 128GB 未満 | 61,838 MiB ✅ |
+
+## 2026-11-20 人物の正面・背面融合を修正
+
+前節のバラ動画について、工程順の抜き出し画像だけで合格とした評価を訂正する。
+全体を5フレーム間隔で再確認すると、女性の顔・肩・胴体の向きが一致せず、
+正面と背面が融合したような破綻があった。工程順が正しいだけでは受入不可。
+
+- 次区間へ「完了済みの動作」を再記述せず、前区間の可視終了状態だけを渡す。
+- Qwen計画へ各工程の終了状態、固定カメラ方向、手・保持物の物理整合性を追加。
+- 正面・左右横・背面のいずれか1方向へ固定し、頭・肩・胴・腰・膝・足の
+  向きを揃える。
+- ネガティブへ前後融合、胴体反転、頭部180度反転、関節ねじれ、重複肢を追加。
+- Animate 2は選択した1面と同じ方向へ動作ガイドを固定。公式ノードは参照画像を
+  1枚しか使えないため、正面から背面へ回転する動作はUIで非対応と明記。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 旧バラ動画 `d57ed266-…` を5フレーム間隔・33枚で確認 | 身体方向が一貫 | ❌ 顔・肩・胴体の方向不一致を確認 |
+| 状態付きプランナーを同じ依頼で単体実行 | 工程・終了状態・身体方向・手の使用が整合 | 3工程、各終了状態、物理整合性監査が全項目true ✅ |
+| 同じ依頼・同じSeed 11・Wan 5B 2区間で再生成（Job `939b8f47-d7a7-4750-841a-37b0d41d2297`） | 前後融合なし、固定構図、工程継続 | 166秒で成功。5フレーム間隔の全体確認で自然な横向き姿勢を維持し、前後融合・胴体反転なし ✅ |
+| Animate用動作プロンプトをfront面で単体生成 | 全身正面を固定 | `face, chest, hips, knees, and feet pointing toward the camera` を確認 ✅ |
+| 生成中ピークメモリ | 128GB未満 | 63,340 MiB ✅ |
+
+## 2026-11-20 完成動画からの続き生成
+
+- DBへ`continuation_of`を追加し、完成したWan 5B / Wan 14Bジョブを
+  親として指定可能にした。
+- 受付時に親動画の正確な最終フレームをPNGへ抽出。親を後から削除しても
+  開始画像は失われない。
+- モデル、画質優先、Wan 14B精度優先を親から継承する。
+- プランナーへ親の最終可視状態を渡し、過去の動作を繰り返さず新しい指示
+  だけを実行する。
+- 続き部分の生成後、親動画と`-c copy`で連結して累積`extended.mp4`を作成。
+  延長済み動画をさらに延長できる。
+- 続きが待機中・実行中の間は親ジョブの削除を409で拒否する。
+- UIの完成動画画面へ「この動画の続きを作る」を追加。モデルを固定し、
+  追加する長さだけ選択可能。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| ブラウザーで青いボール完成ジョブから「この動画の続きを作る」 | 続きモード、同じモデル、親と同じ追加長を表示 | 見出し・説明・無効化したWan 5B・約10秒・解除ボタンを確認 ✅ |
+| Wan 5B親をWan 14Bで継続するAPI要求 | 同一エンジン制約で拒否 | HTTP409 `A continuation must use the same video engine` ✅ |
+| 親`9b287c05-…`から続き`7bcf521c-…`を受付 | 最終フレームを子ジョブへ保存 | output/inputの両PNGを作成、親の真の最終フレーム（frame 161）とSHA256完全一致 ✅ |
+| 続き実行中に親へ`DELETE` | 親を保護 | HTTP409 `Wait for or cancel the active continuation...` ✅ |
+| Wan 5B 10.125秒へ5.0625秒を追加 | 1本の約15秒動画 | 86秒で成功、`extended.mp4` 15.1875秒・243フレーム ✅ |
+| 親最終フレームと続き先頭を比較 | 接続で場面リセットしない | SSIM 0.991411、PSNR 40.540629 dB。境界前後8フレームで同じ床・壁・青いボールを維持 ✅ |
+| 実行中ピークメモリ | 128GB未満 | 61,403 MiB ✅ |
+
+## 2026-11-20〜21 品質優先マルチバックエンド改修
+
+### 制御面・工程監査・Wan 14Bプロファイル
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `automation-env/bin/python -m unittest discover -s tests -v` | 既存API、DB移行、キャンセル、継続、バックエンド契約を固定 | 43テスト成功 ✅ |
+| Qwen計画の欠落・順序・状態遷移fixture | 2回目も監査不合格ならGPUへ送らず停止 | `PlanAuditError`、`plan_rejected`イベント、Comfy/LTX生成呼出し0回を確認 ✅ |
+| Wan 14B未指定profileの単体試験 | 20 steps、CFG 3.5、LoRAなし | `quality`が既定、workflow switch `false`を確認 ✅ |
+| Wan 14B `fast`単体試験 | 4 steps、LightX2V LoRAあり | 明示選択時だけworkflow switch `true`を確認 ✅ |
+
+実装では`automation/backends/`へComfy/LTX共通契約、registry、排他的
+GPU managerを追加した。モデル切替前にComfy `/free`、LTX `/release`、
+Ollama `keep_alive: 0`を実行する。
+
+### 継続Bundleと品質ゲート
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 成功区間からContinuationBundleを作成 | 終端約1秒の9フレーム、tail MP4、厳密な最終フレーム、probe、Qwen動作状態を保存 | `continuation_json`とジョブ配下資産へ保存、次プロンプトへ人数・向き・姿勢・方向・速度・保持物・カメラ状態を反映 ✅ |
+| synthetic moving/frozen/black fixtureを校正 | 正常動画だけ合格 | moving合格、5秒静止と黒動画をhard failureとして検出 ✅。`benchmarks/quality-gate-calibration.json`へ保存 |
+| 人体向き不履行動画を生成 | 高信頼違反を検出し1回だけ再生成 | カメラズーム違反を検出、2試行目も不合格で失敗終了。失敗動画は`/outputs`からHTTP 404 ✅ |
+| Wan継続 Job `a359b39a-bd81-4319-8106-fb655efe513d` | Bundleを使い、品質合格時だけ公開 | Bundleで2回生成まで進行。モデルが静止したため両試行を品質ゲートが遮断し非公開 ✅ |
+
+品質判定はffprobe形式、黒/フリーズ、Qwen Visionの人体構造・正背面融合・
+向き・ID・指示進行、継続境界SSIM/PSNRを集約する。不合格理由を反映した
+自動再生成は正確に1回で終了する。
+
+### 公式LTXワーカーの固定・構築
+
+固定値:
+
+- LTX repository commit:
+  `daa6b16fc7f0f1628f2c9e36a303e3312b333cc6`
+- `ltx-pipelines` 1.6.2
+- worker image:
+  `unbound-ltx-worker:1.6.2`
+- image ID:
+  `sha256:bd25de6c8e3ad890f46a3cecfcabf55211cd43b3a2dbfe1778aeca144114592b`
+- PyTorch `2.13.0+cu132`、NATTEN `0.21.7`
+- loopback bind `127.0.0.1:8191`
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `docker compose --profile ltx build ltx` | ARM64固定依存だけでworkerを構築 | 初回構築成功後、実推論時にTriton launcher用C compiler不足で失敗 ❌ |
+| `Dockerfile.ltx`へ`gcc libc6-dev`を追加して再build | 初回CUDA launcherをローカルコンパイル | 再構築成功、`gcc 12.2.0`、TI2/DFR/chunked実推論成功 ✅ |
+| `/health` | 固定versionとprofile readinessを返す | commit/version一致、最終的に`ti2_hq=true`、`dfr=true`、`ti2_chunked=true` ✅ |
+| `ss -ltn`、Compose/コンテナinspect | 外部へ公開せず、モデルread-only、権限縮小 | 8001/8188/8191/11434すべて`127.0.0.1`、LTX user 10001、capabilities ALL drop、models read-only ✅ |
+
+### Native LTXモデル取得
+
+大容量取得はユーザー承認後に実施した。`scripts/download-models.py`は
+認証付きRange再開へ改修し、切断・DNS障害時に取得済みbyteを保持し、
+Range無視応答で既存partialをtruncateしない。
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `scripts/download-models.py ltx25-hq` | dev BF16、BF16 text encoder、distilled LoRA、duration headを固定SHAで取得 | 接続切断を挟んだが再開し、全資産のsize/SHA256検証成功 ✅ |
+| `scripts/download-models.py ltx25-dfr`（初回） | distilled BF16とDFR detailing LoRAを取得 | detailing LoRA repositoryがgatedでHTTP 403 ❌。既存資産は保持 |
+| Hugging Faceで同repositoryの`Agree and Access`後に再実行 | 327,322,640-byte LoRAを取得 | SHA256 `984851b7...b283c1d`一致、全DFR資産検証成功 ✅ |
+
+新規native資産は既存VAE/upscalerを除き119,531,295,248 bytes。
+全サイズ・SHA256は`models/MANIFEST.md`へ記録した。
+
+### Native LTX実GPU受入
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| TI2 HQ 256×256、9 frames | guided二段階の最小生成 | 204.19秒、peak host memory 59,767,787,520 bytes、成功 ✅ |
+| `ti2_chunked` 256×256、105 frames | 97-frame窓・25-frame carry・25-frame overlap blendで長尺生成 | 352.58秒、peak 59,637,501,952 bytes、成功 ✅ |
+| Automation→TI2 HQ 960×576、121 frames | API、計画、native worker、品質ゲート、Bundleを統合 | Job `980028f1-e391-4470-8473-e525835d8364`、333.42秒、peak 59,067,547,648 bytes、全ゲート合格 ✅ |
+| DFR 256×256、9 frames | detailing LoRA経路の最小生成 | 72.07秒、peak 53,689,622,528 bytes、成功 ✅ |
+| Automation→DFR 960×576、121 frames | text-to-video、工程監査、品質ゲート、Bundleを統合 | Job `0821c03a-0bdc-4651-a277-b5ef327fc48d`、約178.6秒、技術・フリーズ・意味ゲート合格 ✅ |
+
+LTX出力にはvideo H.264とaudio AACの2 streamがあり、5.0625秒動画に対し
+音声は5.0500〜5.0625秒だった。原本へremux/metadata除去は行っていない。
+
+### 3経路・2 seed同条件比較
+
+条件は公式dragon画像、同一prompt、640×640、81 frames、16 fps、
+seed 10 / 314159。各生成前に他モデルを解放した。
+
+| 経路 | 2回の時間 | 最大peak host memory | 品質結果 |
+|---|---:|---:|---|
+| ComfyUI LTX distilled INT8 | 57.02 / 44.30秒 | 59,517,292,544 bytes | 2/2合格 |
+| DFR BF16 + detailing LoRA | 110.13 / 98.14秒 | 57,860,374,528 bytes | 2/2合格 |
+| TI2Vid Two-Stage HQ | 208.26 / 212.30秒 | 63,185,891,328 bytes | 2/2合格 |
+
+3経路とも人体、正背面融合、向き、ID、指示、形式、黒/フリーズ検査に合格。
+この2 seedではnative経路の再現可能な品質優位を立証できなかったため、
+短尺既定はComfyのまま、DFR/HQを明示選択、長尺は`ti2_chunked`とした。
+詳細、出力SHA256、blind label、各ログは
+`benchmarks/ltx-backend-comparison.json`へ保存した。
+
+### ComfyUI 0.45.0単体オフライン再受入
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `scripts/test-offline.sh` | ComfyコンテナをDocker networkから切断し、外部通信なしで公式5Bを再生成 | 外部HTTPSは`URLError`、prompt `dc9a9850-05c5-4fcf-8909-381d214e6c9d`が328.49秒で成功 ✅ |
+| exit trap後にUI確認 | 元networkへ復帰 | `127.0.0.1:8188`でHTTP 200 ✅ |
+
+### 管理LANを維持した完全サービス隔離受入
+
+当初はホストのWi-Fi/有線LANを両方切断する手順を準備したが、このマシンは
+Macからネットワーク越しに管理しており、管理経路を失うため中止した。
+ホスト接続を維持しつつ生成サービスだけを実ネットワークから隔離する
+`scripts/test-service-offline-acceptance.sh`へ変更した。
+
+隔離構成:
+
+- Automation、Ollama/Qwen、ComfyUI、LTXをすべてDocker
+  `network_mode: none`で一時起動。
+- サービス間HTTPだけを共有Unix socket relayで接続。
+- 4コンテナ内から`1.1.1.1:443`へ接続し、すべて`OSError`を確認。
+- Docker socketはFFmpeg/ffprobeの固定`compose exec`にだけ使用。
+- exit trapで通常の127.0.0.1限定サービスを再作成し、APIを再起動。
+
+構築時の失敗と復旧:
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| user systemd `IPAddressDeny=any` / `PrivateNetwork=yes` | host loopbackだけ許可 | user managerでは制限が適用されず外部到達したため不採用 ❌ |
+| `unshare --user --map-root-user --net` | 非特権network namespace | uid_mapが許可されず不採用 ❌ |
+| 初回isolated Automation起動 | APIをprivate loopbackで起動 | working directoryが`/opt/ComfyUI`で`automation` import失敗。project rootへ`cd`して復旧 |
+| 初回isolated Ollama計画 | Qwenをローカルロード | `llama-server`外部binary不足。`/usr/local/lib/ollama`をread-only mountして復旧 |
+| 初回品質検査 | isolated Comfyへffprobe | UID 1000が`/root/.docker/config.json`を読めずCompose plugin未検出。`HOME=/home/ubuntu`へ修正 |
+
+最終結果:
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 4コンテナの`NetworkMode`と外部socket接続を確認 | 全サービス`none`、外部接続失敗 | 4/4で`network none`、4/4で外部接続`OSError` ✅ |
+| isolated Automation→Qwen→Comfy Wan→品質ゲート→Bundle | 外部通信なしで生成・検査 | Job `44525b23-3da5-4d84-ae30-8f9f65e70c51`、約176.2秒、全ゲート合格 ✅ |
+| isolated Automation→Qwen→LTX DFR→品質ゲート→Bundle | 外部通信なしでnative生成・検査 | Job `df419b7f-f29f-40b2-91b8-6e06c511b50c`、約172.1秒、全ゲート合格 ✅ |
+| 待機ジョブを即時cancel | GPU実行前にcancelled | Job `a951dd5f-f763-4eb9-8b3b-468a83472189`、outputなし ✅ |
+| 受入後Ollama `/api/ps` / LTX `/health` | モデル常駐なし | `models=[]`、`active_job_id=null` ✅ |
+| 受入中MemAvailable監視 | 128GB内で逐次実行 | minimum 71,976,230,912 bytes、peak used 58,684,743,680 bytes ✅ |
+| exit trap後の通常サービス確認 | Mac接続を維持して127.0.0.1限定へ復元 | API/Comfy/LTX/Ollama正常、8001/8188/8191/11434すべてloopback限定 ✅ |
+
+レポート:
+`logs/offline-acceptance-20261121T020905Z.json`
+
+## 2026-11-21 直前変更のロールバックとGit初期化
+
+ユーザー指定により、軽量品質チェック切替と、その際に追加した生成前拒否
+チェックをどちらも取り消し、品質優先マルチバックエンド改修完了時点へ戻した。
+マルチバックエンド、20-step Wan品質既定、Continuation Bundle、LTX公式経路、
+厳格品質ゲート＋1回限定自動再生成は維持した。
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `git status --short --branch` | 既存Git履歴を確認 | `.git`がなく、Git履歴からのrevertは不可能と確認 |
+| 直前変更を逆適用 | 軽量検査切替と生成前拒否追加前の実装へ復元 | API、UI、テスト、READMEから該当変更を削除 ✅ |
+| `automation-env/bin/python -m py_compile ...` | ロールバック後の構文成功 | 成功 ✅ |
+| `automation-env/bin/python -m unittest discover -s tests -v` | 一つ前のテスト集合が成功 | 43テスト成功 ✅ |
+| APIプロセス停止後`scripts/start-api.sh` | 復元コードで再起動 | `http://127.0.0.1:8001/`でready ✅ |
+| `.gitignore`を追加 | モデル、入力、出力、DB、venv、vendor cloneを除外 | 212GBのモデル資産を含む実行時データを追跡対象外に設定 ✅ |
+| `git init -b main && git add -A` | ソースと再現性文書だけをステージ | 98ファイル、Git object約1MB。秘密鍵・既知トークン形式の一致なし ✅ |

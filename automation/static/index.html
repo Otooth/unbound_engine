@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unbound Engine</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: #11151d;
+      --panel-2: #171c26;
+      --line: #2a3140;
+      --text: #f4f6fb;
+      --muted: #9ca6b8;
+      --accent: #8b7cff;
+      --accent-2: #64d8cb;
+      --danger: #ff7d91;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 15% -10%, #2b245f 0, transparent 34rem),
+        radial-gradient(circle at 95% 10%, #123d42 0, transparent 28rem),
+        var(--bg);
+      color: var(--text);
+    }
+    button, input, textarea, select { font: inherit; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 60px; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      width: 42px; height: 42px; border-radius: 13px;
+      box-shadow: 0 0 28px #8073ff55;
+    }
+    h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .health { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 7px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #687080; }
+    .dot.ok { background: #5be19b; box-shadow: 0 0 10px #5be19b99; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(340px, .95fr); gap: 20px; }
+    .panel {
+      border: 1px solid var(--line); border-radius: 20px; background: #11151de8;
+      box-shadow: 0 20px 60px #0005; overflow: hidden;
+    }
+    .panel-body { padding: 22px; }
+    .panel-title { font-size: 14px; font-weight: 700; margin: 0 0 18px; }
+    label { display: block; color: var(--muted); font-size: 12px; margin: 0 0 7px; }
+    textarea, select, input[type="number"] {
+      width: 100%; border: 1px solid var(--line); border-radius: 12px;
+      background: #0c0f15; color: var(--text); outline: none;
+      padding: 12px 13px; transition: border .2s, box-shadow .2s;
+    }
+    textarea { min-height: 142px; resize: vertical; line-height: 1.55; }
+    textarea:focus, select:focus, input:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px #8b7cff20;
+    }
+    .field { margin-bottom: 16px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .upload {
+      display: flex; align-items: center; gap: 12px; padding: 12px;
+      border: 1px dashed #3a4355; border-radius: 12px; background: #0c0f1580;
+    }
+    .upload input { min-width: 0; width: 100%; color: var(--muted); font-size: 12px; }
+    .hint { color: var(--muted); font-size: 11px; margin-top: 7px; line-height: 1.45; }
+    .reference-preview {
+      display: none; width: min(100%, 220px); aspect-ratio: 480 / 832;
+      margin: 10px auto 0; object-fit: contain; background: white;
+      border: 1px solid var(--line); border-radius: 10px;
+    }
+    .reference-preview.show { display: block; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .mode-switch {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      padding: 4px; border: 1px solid var(--line); border-radius: 13px;
+      background: #0c0f15;
+    }
+    .mode-option {
+      border: 0; border-radius: 9px; padding: 10px; cursor: pointer;
+      color: var(--muted); background: transparent; font-weight: 700;
+    }
+    .mode-option.active {
+      color: white; background: linear-gradient(100deg, #745fff, #45bdb1);
+    }
+    .check { display: none; align-items: flex-start; gap: 9px; margin: 14px 0; color: #cbd1dc; font-size: 12px; }
+    .check.show { display: flex; }
+    .check input { margin-top: 2px; }
+    .primary {
+      width: 100%; border: 0; border-radius: 13px; padding: 13px 16px;
+      color: white; font-weight: 700; cursor: pointer;
+      background: linear-gradient(100deg, #745fff, #9b6cff 52%, #45bdb1);
+      box-shadow: 0 10px 28px #765fff35; transition: transform .15s, opacity .15s;
+    }
+    .primary:hover { transform: translateY(-1px); }
+    .primary:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .cancel-button {
+      display: none; width: 100%; margin-top: 16px; padding: 10px 14px;
+      border: 1px solid #703747; border-radius: 11px; cursor: pointer;
+      color: #ffb5c0; background: #321721;
+    }
+    .cancel-button.show { display: block; }
+    .cancel-button:disabled { opacity: .5; cursor: wait; }
+    .continue-button {
+      display: none; width: 100%; margin-top: 16px; padding: 11px 14px;
+      border: 1px solid #416e69; border-radius: 11px; cursor: pointer;
+      color: #9df1e6; background: #14332f;
+    }
+    .continue-button.show { display: block; }
+    .continuation-banner {
+      display: none; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 18px; padding: 12px 14px;
+      border: 1px solid #416e69; border-radius: 12px; background: #102925;
+      color: #c9fff8; font-size: 12px;
+    }
+    .continuation-banner.show { display: flex; }
+    .continuation-banner strong { display: block; margin-bottom: 3px; }
+    .continuation-banner button {
+      border: 1px solid #577a76; border-radius: 8px; padding: 5px 9px;
+      color: #c9fff8; background: transparent; cursor: pointer;
+    }
+    .stage-empty {
+      min-height: 405px; display: grid; place-items: center; text-align: center;
+      color: var(--muted); padding: 32px;
+    }
+    .stage-empty strong { display: block; color: var(--text); font-size: 17px; margin-bottom: 7px; }
+    .job-view { display: none; }
+    .job-view.show { display: block; }
+    .video-wrap { aspect-ratio: 1; background: #050609; display: grid; place-items: center; }
+    video { width: 100%; height: 100%; object-fit: contain; display: none; }
+    video.show { display: block; }
+    .progress-area { padding: 20px 22px 22px; }
+    .status-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .status-name { font-weight: 700; font-size: 15px; }
+    .status-time { color: var(--muted); font-size: 12px; }
+    .bar { height: 7px; margin: 14px 0 17px; background: #282e3b; border-radius: 99px; overflow: hidden; }
+    .bar > div {
+      height: 100%; width: 8%; border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .45s;
+    }
+    .events { display: flex; flex-direction: column; gap: 8px; }
+    .event { display: flex; gap: 9px; color: var(--muted); font-size: 12px; }
+    .event::before { content: ""; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: #667085; flex: 0 0 auto; }
+    .event:last-child { color: var(--text); }
+    .event:last-child::before { background: var(--accent-2); }
+    .error { color: var(--danger); font-size: 12px; margin-top: 12px; white-space: pre-wrap; }
+    .recent { margin-top: 20px; }
+    .recent h2 { font-size: 14px; margin: 0 0 10px; }
+    .jobs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .job-card {
+      border: 1px solid var(--line); border-radius: 13px; background: #11151d;
+      color: var(--text); text-align: left; padding: 12px; cursor: pointer;
+    }
+    .job-card:hover { border-color: #535e76; }
+    .job-card .meta { color: var(--muted); font-size: 11px; margin-top: 5px; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .delete-job {
+      border: 1px solid #5a3440; border-radius: 8px; padding: 3px 9px;
+      background: transparent; color: #ff9aaa; font-size: 11px; cursor: pointer;
+    }
+    .delete-job:hover { background: #40202a; }
+    .pill { display: inline-block; padding: 3px 7px; border-radius: 99px; background: #282e3b; font-size: 10px; color: #cdd3df; }
+    .pill.succeeded { background: #15372c; color: #7de4ae; }
+    .pill.failed { background: #40202a; color: #ff9aaa; }
+    .pill.cancelled { background: #3b3030; color: #d8b5b5; }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+      .jobs { grid-template-columns: 1fr; }
+      header { align-items: flex-start; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand">
+        <img class="mark" src="/assets/logo.svg" alt="Unbound Engine">
+        <div><h1>Unbound Engine</h1><div class="subtitle">Video Studio · ローカルAI動画生成</div></div>
+      </div>
+      <div class="health"><span class="dot" id="healthDot"></span><span id="healthText">接続確認中</span></div>
+    </header>
+
+    <section class="grid">
+      <form class="panel" id="jobForm">
+        <div class="panel-body">
+          <h2 class="panel-title" id="formTitle">新しい動画</h2>
+          <div class="continuation-banner" id="continuationBanner">
+            <div><strong>完成動画の続きとして生成</strong><span id="continuationLabel"></span></div>
+            <button type="button" id="clearContinuation">解除</button>
+          </div>
+          <div class="field">
+            <label for="concept">作りたい映像を日本語で入力</label>
+            <textarea id="concept" required minlength="10" maxlength="2000"
+              placeholder="例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。"></textarea>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="engine">動画モデル</label>
+              <select id="engine">
+                <option value="wan5b">Wan 2.2 5B — 文章から動画</option>
+                <option value="animate2">Wan Animate 2 — 登録した1面を動かす</option>
+                <option value="wan14">Wan 2.2 14B — 画像を動かす</option>
+                <option value="ltx25">LTX-2.5 — 画像を動かす・音声付き</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="shots">動画の長さ</label>
+              <select id="shots">
+                <option value="1">約5秒</option>
+                <option value="2">約10秒（連続生成）</option>
+                <option value="3">約15秒（連続生成）</option>
+              </select>
+              <div class="hint">10秒・15秒では、前区間の最終フレームを次区間へ引き継ぎます。</div>
+            </div>
+          </div>
+          <div class="field" id="imageField" style="display:none">
+            <label id="imageLabel">開始画像</label>
+            <select id="existingImage"></select>
+            <div class="upload" style="margin-top:8px">
+              <input type="file" id="imageFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+            </div>
+            <div class="hint" id="imageHint">画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。</div>
+          </div>
+          <div id="animateFields" style="display:none">
+            <div class="row">
+              <div class="field">
+                <label for="sideImage">側面画像（任意）</label>
+                <select id="sideImage"></select>
+                <div class="upload" style="margin-top:8px">
+                  <input type="file" id="sideFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+                </div>
+              </div>
+              <div class="field">
+                <label for="backImage">背面画像（任意）</label>
+                <select id="backImage"></select>
+                <div class="upload" style="margin-top:8px">
+                  <input type="file" id="backFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label for="primaryView">全編で固定する向き（使用する1面）</label>
+              <select id="primaryView">
+                <option value="front">正面</option>
+                <option value="side">側面</option>
+                <option value="back">背面</option>
+              </select>
+              <div class="hint">公式Wan Animate 2が1回に参照できる画像は1枚だけです。選んだ向きを全編で固定します。途中で正面から背面へ振り向く動作は、身体の前後が融合するため使用できません。動作動画も同じ向きを保つものを指定してください。</div>
+            </div>
+            <div class="field">
+              <label for="characterView">三面図から使用する正面図の位置</label>
+              <select id="characterView">
+                <option value="whole">画像が最初から1人（推奨）</option>
+                <option value="left">三面図の左側</option>
+                <option value="center">中央</option>
+                <option value="right">右側</option>
+              </select>
+              <div class="hint">横並び三面図では正面図の位置を選びます。モデルが使うのは1枚だけで、3枚を同時には参照しません。</div>
+            </div>
+            <div class="field" id="cropAdjustField" style="display:none">
+              <label for="cropOffset">切り出し位置の微調整</label>
+              <input type="range" id="cropOffset" min="-100" max="100" value="0">
+              <label for="cropScale" style="margin-top:10px">切り出し幅（頭や手足が欠ける場合は広げる）</label>
+              <input type="range" id="cropScale" min="80" max="140" value="100">
+            </div>
+            <div class="field">
+              <label>モデルへ渡す参照画像</label>
+              <img id="characterPreview" class="reference-preview" alt="切り出したキャラクターのプレビュー">
+              <div class="hint">全身が頭から足先まで1人だけ表示され、文字や別のビューが入っていないことを確認してください。白い余白は、縦長画像が頭部だけに中央クロップされるのを防ぎます。</div>
+            </div>
+            <div class="field">
+              <label for="motionFile">動作元動画（MP4・任意）</label>
+              <div class="upload">
+                <input type="file" id="motionFile" accept=".mp4,video/mp4">
+              </div>
+              <div class="hint">指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。</div>
+            </div>
+          </div>
+          <div class="field">
+            <label>生成品質</label>
+            <div class="mode-switch">
+              <button type="button" class="mode-option active" data-quality="normal">標準・高速</button>
+              <button type="button" class="mode-option" data-quality="quality">画質優先</button>
+            </div>
+            <div class="hint" id="qualityHint">標準解像度と通常圧縮で生成します。</div>
+          </div>
+          <div class="field" id="profileField" style="display:none">
+            <label for="generationProfile">推論経路</label>
+            <select id="generationProfile"></select>
+            <div class="hint" id="profileHint"></div>
+          </div>
+          <div class="field">
+            <label for="seed">Seed（同じ映像を再現するときだけ指定）</label>
+            <input type="number" id="seed" min="0" placeholder="空欄なら毎回ランダム">
+          </div>
+          <label class="check show">
+            <input type="checkbox" id="enhancePrompt" checked>
+            <span>人物・人数・動作を保ったまま、AIで英語の映像プロンプトに変換する（推奨）</span>
+          </label>
+          <label class="check" id="ltxCheck">
+            <input type="checkbox" id="ltxAck">
+            <span><strong>必須：</strong>LTX-2.5のライセンスとAcceptable Use Policyを確認し、一般映像にのみ使用します。</span>
+          </label>
+          <button class="primary" id="submitButton" type="submit">動画を生成</button>
+          <div class="hint" style="text-align:center">処理は完全にこのマシン内で行われ、生成ごとのAPI料金はかかりません。</div>
+        </div>
+      </form>
+
+      <section class="panel">
+        <div class="stage-empty" id="emptyStage">
+          <div><strong>ここに完成動画が表示されます</strong>左の内容を入力して「動画を生成」を押してください。</div>
+        </div>
+        <div class="job-view" id="jobView">
+          <div class="video-wrap"><video id="resultVideo" controls playsinline></video></div>
+          <div class="progress-area">
+            <div class="status-line">
+              <span class="status-name" id="statusName">準備中</span>
+              <span class="status-time" id="statusTime"></span>
+            </div>
+            <div class="bar"><div id="progressBar"></div></div>
+            <div class="events" id="events"></div>
+            <div class="hint" id="qualitySummary"></div>
+            <button class="cancel-button" id="cancelButton" type="button">生成をキャンセル</button>
+            <button class="continue-button" id="continueJobButton" type="button">この動画の続きを作る</button>
+            <button class="cancel-button" id="deleteJobButton" type="button">この履歴と動画を削除</button>
+            <div class="error" id="error"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="recent">
+      <h2>最近の生成</h2>
+      <div class="jobs" id="recentJobs"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const statusLabels = {
+      queued: "順番待ち", planning: "プロンプトを設計中", motion: "動作の下書きを生成中",
+      generating: "動画を生成中", continuing: "次の区間へ接続中",
+      analyzing: "動きと品質を解析中", validating: "品質検査中",
+      quality_retry: "品質条件を補強して再生成中", plan_rejected: "工程監査で停止",
+      finishing: "動画を仕上げ中", extending: "元動画と続きを連結中",
+      succeeded: "完成", failed: "失敗",
+      cancelled: "キャンセル済み"
+    };
+    const progress = { queued: 8, planning: 18, motion: 42, generating: 65, continuing: 72, analyzing: 78, validating: 86, quality_retry: 55, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
+    let activeJob = null;
+    let currentJob = null;
+    let continuationSource = null;
+    let pollTimer = null;
+    let qualityMode = false;
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = body.detail?.[0]?.msg || body.detail || `HTTP ${response.status}`;
+        throw new Error(message);
+      }
+      return body;
+    }
+
+    async function loadHealth() {
+      try {
+        const health = await api("/health");
+        const ok = health.ollama?.ok && health.comfyui?.ok;
+        $("healthDot").classList.toggle("ok", ok);
+        $("healthText").textContent = ok ? "準備完了" : "一部サービス停止";
+      } catch {
+        $("healthText").textContent = "接続できません";
+      }
+    }
+
+    async function loadInputs(selected, targetId = "existingImage") {
+      const images = await api("/inputs");
+      ["existingImage", "sideImage", "backImage"].forEach((id) => {
+        const current = id === targetId && selected
+          ? selected
+          : $(id).value;
+        $(id).innerHTML = '<option value="">-- 参照画像を選択 --</option>' + images.map((name) =>
+          `<option value="${escapeHtml(name)}"${name === current ? " selected" : ""}>${escapeHtml(name)}</option>`
+        ).join("");
+      });
+    }
+
+    async function prepareCharacterReference(
+      source, position, offsetPercent = 0, cropScalePercent = 100
+    ) {
+      const bitmap = await createImageBitmap(source);
+      const baseWidth = position === "whole"
+        ? bitmap.width
+        : Math.floor(bitmap.width / 3);
+      const cropWidth = position === "whole"
+        ? baseWidth
+        : Math.min(
+            bitmap.width,
+            Math.round(baseWidth * Number(cropScalePercent) / 100)
+          );
+      if (cropWidth < 64 || bitmap.height < 64) {
+        bitmap.close();
+        throw new Error("参照画像の解像度が小さすぎます。");
+      }
+      const index = { left: 0, center: 1, right: 2 }[position] ?? 0;
+      const viewCenter = (index + 0.5) * baseWidth;
+      const baseX = position === "whole" ? 0 : viewCenter - cropWidth / 2;
+      const offset = position === "whole"
+        ? 0
+        : (Number(offsetPercent) / 100) * baseWidth;
+      const sourceX = Math.max(
+        0, Math.min(bitmap.width - cropWidth, baseX + offset)
+      );
+      const targetHeight = 1536;
+      const targetWidth = Math.round(targetHeight * 480 / 832);
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "white";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const padding = 0.06;
+      const scale = Math.min(
+        canvas.width * (1 - padding * 2) / cropWidth,
+        canvas.height * (1 - padding * 2) / bitmap.height
+      );
+      const drawWidth = cropWidth * scale;
+      const drawHeight = bitmap.height * scale;
+      const drawX = (canvas.width - drawWidth) / 2;
+      const drawY = (canvas.height - drawHeight) / 2;
+      const drawReference = () => context.drawImage(
+        bitmap, sourceX, 0, cropWidth, bitmap.height,
+        drawX, drawY, drawWidth, drawHeight
+      );
+      drawReference();
+      const sampleY = Math.min(canvas.height - 1, Math.max(0, drawY + 3));
+      const samples = [
+        context.getImageData(Math.max(0, drawX + 3), sampleY, 1, 1).data,
+        context.getImageData(
+          Math.min(canvas.width - 1, drawX + drawWidth - 4),
+          sampleY, 1, 1
+        ).data
+      ];
+      const background = [0, 1, 2].map((channel) =>
+        Math.round((samples[0][channel] + samples[1][channel]) / 2)
+      );
+      context.fillStyle = `rgb(${background.join(",")})`;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      drawReference();
+      bitmap.close();
+      return new Promise((resolve, reject) => canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("参照画像を準備できませんでした。")),
+        "image/png"
+      ));
+    }
+
+    let previewUrl = null;
+
+    async function selectedCharacterSource() {
+      const file = $("imageFile").files[0];
+      if (file) return file;
+      const selected = $("existingImage").value;
+      if (!selected) return null;
+      const response = await fetch(`/inputs/${encodeURIComponent(selected)}`);
+      if (!response.ok) throw new Error("選択した参照画像を読み込めませんでした。");
+      return response.blob();
+    }
+
+    async function updateCharacterPreview() {
+      if ($("engine").value !== "animate2") return;
+      const source = await selectedCharacterSource();
+      const preview = $("characterPreview");
+      if (!source) {
+        preview.classList.remove("show");
+        return;
+      }
+      const prepared = await prepareCharacterReference(
+        source, $("characterView").value, $("cropOffset").value,
+        $("cropScale").value
+      );
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(prepared);
+      preview.src = previewUrl;
+      preview.classList.add("show");
+    }
+
+    async function uploadImage(characterView = null) {
+      let source = characterView
+        ? await selectedCharacterSource()
+        : $("imageFile").files[0];
+      if (!source) return $("existingImage").value;
+      const upload = characterView
+        ? await prepareCharacterReference(
+            source, characterView, $("cropOffset").value,
+            $("cropScale").value
+          )
+        : source;
+      const data = new FormData();
+      data.append("file", upload, characterView ? "character-reference.png" : source.name);
+      const result = await api("/inputs", { method: "POST", body: data });
+      await loadInputs(result.filename);
+      return result.filename;
+    }
+
+    async function uploadAdditionalReference(selectId, fileId) {
+      const file = $(fileId).files[0];
+      if (!file) return $(selectId).value;
+      const prepared = await prepareCharacterReference(file, "whole");
+      const data = new FormData();
+      data.append("file", prepared, `character-${selectId}.png`);
+      const result = await api("/inputs", { method: "POST", body: data });
+      await loadInputs(result.filename, selectId);
+      return result.filename;
+    }
+
+    async function uploadMotionVideo() {
+      const file = $("motionFile").files[0];
+      if (!file) return null;
+      const data = new FormData();
+      data.append("file", file);
+      const result = await api("/input-videos", { method: "POST", body: data });
+      return result.filename;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[c]);
+    }
+
+    function showJob(job, events = []) {
+      activeJob = job.id;
+      currentJob = job;
+      $("emptyStage").style.display = "none";
+      $("jobView").classList.add("show");
+      $("statusName").textContent = statusLabels[job.status] || job.status;
+      $("progressBar").style.width = `${progress[job.status] || 5}%`;
+      $("statusTime").textContent = new Date(job.updated_at).toLocaleTimeString("ja-JP");
+      $("events").innerHTML = events.map((event) =>
+        `<div class="event">${escapeHtml(statusLabels[event.stage] || event.message)}</div>`
+      ).join("");
+      const quality = job.quality;
+      if (quality) {
+        const hardIssues = (quality.issues || []).filter((issue) => issue.hard);
+        const attempts = Math.max(
+          0,
+          ...(quality.attempts || []).map((item) => Number(item.attempt) || 0)
+        );
+        $("qualitySummary").textContent = quality.passed
+          ? `品質検査：合格${attempts > 1 ? "（1回再生成）" : ""}`
+          : `品質不合格：${hardIssues.map((issue) => issue.code).join("、") || "判定不能"}`;
+      } else {
+        $("qualitySummary").textContent = "";
+      }
+      $("error").textContent = job.status === "failed" ? job.error || "" : "";
+      const video = $("resultVideo");
+      if (job.status === "succeeded" && job.output_url) {
+        if (video.dataset.path !== job.output_url) {
+          video.src = job.output_url;
+          video.dataset.path = job.output_url;
+        }
+        video.classList.add("show");
+      } else {
+        video.classList.remove("show");
+      }
+      const terminal = ["succeeded", "failed", "cancelled"].includes(job.status);
+      $("submitButton").disabled = !terminal;
+      $("cancelButton").classList.toggle("show", !terminal);
+      $("cancelButton").disabled = false;
+      $("cancelButton").textContent = "生成をキャンセル";
+      $("deleteJobButton").classList.toggle("show", terminal);
+      $("continueJobButton").classList.toggle(
+        "show",
+        job.status === "succeeded"
+          && ["wan5b", "wan14"].includes(job.engine)
+          && Boolean(job.output_url)
+      );
+    }
+
+    async function refreshJob(id) {
+      const [job, events] = await Promise.all([api(`/jobs/${id}`), api(`/jobs/${id}/events`)]);
+      showJob(job, events);
+      if (["succeeded", "failed", "cancelled"].includes(job.status)) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        await loadRecent();
+      }
+    }
+
+    function watchJob(id) {
+      clearInterval(pollTimer);
+      refreshJob(id);
+      pollTimer = setInterval(() => refreshJob(id).catch((e) => {
+        $("error").textContent = e.message;
+      }), 2500);
+    }
+
+    async function loadRecent() {
+      const jobs = await api("/jobs?limit=6");
+      $("recentJobs").innerHTML = jobs.map((job) => `
+        <div class="job-card" data-job="${job.id}" role="button" tabindex="0">
+          <div class="card-head">
+            <span class="pill ${job.status}">${escapeHtml(statusLabels[job.status] || job.status)}</span>
+            ${["succeeded", "failed", "cancelled"].includes(job.status)
+              ? `<button class="delete-job" type="button" data-delete="${job.id}" title="履歴と動画を削除">削除</button>`
+              : ""}
+          </div>
+          <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60))}</div>
+          <div class="meta">${job.engine === "ltx25" ? "LTX-2.5" : job.engine === "wan14" ? "Wan 14B" : job.engine === "animate2" ? "Wan Animate 2" : "Wan 5B"}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 高解像度" : ""}${job.generation_profile ? ` · ${escapeHtml(job.generation_profile)}` : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
+        </div>`).join("") || '<div class="hint">まだ履歴はありません。</div>';
+      document.querySelectorAll("[data-job]").forEach((card) => {
+        card.addEventListener("click", () => watchJob(card.dataset.job));
+        card.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") watchJob(card.dataset.job);
+        });
+      });
+      document.querySelectorAll("[data-delete]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteJob(button.dataset.delete).catch((error) => {
+            $("error").textContent = error.message;
+          });
+        });
+      });
+    }
+
+    async function deleteJob(id) {
+      if (!confirm("この履歴と生成動画・中間ファイルを削除します。元に戻せません。削除しますか？")) return;
+      await api(`/jobs/${id}`, { method: "DELETE" });
+      if (activeJob === id) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        activeJob = null;
+        const video = $("resultVideo");
+        video.pause();
+        video.removeAttribute("src");
+        video.dataset.path = "";
+        video.load();
+        $("jobView").classList.remove("show");
+        $("emptyStage").style.display = "";
+        $("submitButton").disabled = false;
+      }
+      await loadRecent();
+    }
+
+    function setQualityMode(enabled) {
+      qualityMode = Boolean(enabled);
+      document.querySelectorAll("[data-quality]").forEach((item) => {
+        item.classList.toggle(
+          "active",
+          item.dataset.quality === (qualityMode ? "quality" : "normal")
+        );
+      });
+      $("qualityHint").textContent = qualityMode
+        ? "高解像度で生成し、H.264 CRF 0の可逆圧縮で保存します。画質劣化はありませんが、生成時間・メモリ・ファイル容量が増えます。"
+        : "標準解像度と通常圧縮で生成します。";
+    }
+
+    function startContinuation(job) {
+      continuationSource = job;
+      $("engine").value = job.engine;
+      $("engine").dispatchEvent(new Event("change"));
+      $("engine").disabled = true;
+      $("imageField").style.display = "none";
+      $("continuationBanner").classList.add("show");
+      $("continuationLabel").textContent =
+        `${job.engine === "wan14" ? "Wan 14B" : "Wan 5B"} · ${job.id.slice(0, 8)}…`;
+      $("formTitle").textContent = "続きの動画";
+      $("concept").value = "";
+      $("concept").placeholder =
+        "元動画の直後に起こる新しい動作だけを入力してください。以前の動作は書き直さないでください。";
+      $("shots").value = String(Math.max(1, Math.min(3, Number(job.shots) || 1)));
+      setQualityMode(Boolean(job.quality_mode));
+      $("generationProfile").value =
+        job.generation_profile || (job.engine === "wan14" ? "quality" : "comfy");
+      updateProfileHint();
+      $("submitButton").textContent = "続きの動画を生成";
+      $("jobForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("concept").focus({ preventScroll: true });
+    }
+
+    function clearContinuationMode() {
+      continuationSource = null;
+      $("engine").disabled = false;
+      $("continuationBanner").classList.remove("show");
+      $("formTitle").textContent = "新しい動画";
+      $("concept").placeholder =
+        "例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。";
+      $("submitButton").textContent = "動画を生成";
+      $("engine").dispatchEvent(new Event("change"));
+    }
+
+    function updateProfileHint() {
+      const profile = $("generationProfile").value;
+      const hints = {
+        quality: "既定。公式標準20ステップ、CFG 3.5、LightX2V LoRAなし。指示追従を優先します。",
+        fast: "LightX2V 4ステップ。高速ですが、複雑な動作と時間的一貫性は低下します。",
+        comfy: "既存ComfyUI INT8 distilled経路。高速基準として残します。",
+        ti2_hq: "公式TI2Vid Two-Stage HQ。guided BF16二段階経路です。",
+        dfr: "公式DFR production-quality経路。ディテール再描画を行います。",
+        ti2_chunked: "長尺用。97フレーム窓と25フレームcarryで時間状態を引き継ぎます。"
+      };
+      $("profileHint").textContent = hints[profile] || "";
+      const ltx = $("engine").value === "ltx25";
+      const animate = $("engine").value === "animate2";
+      $("shots").disabled = animate || (ltx && profile !== "ti2_chunked");
+      if ($("shots").disabled) $("shots").value = "1";
+    }
+
+    $("engine").addEventListener("change", () => {
+      const ltx = $("engine").value === "ltx25";
+      const animate = $("engine").value === "animate2";
+      const wan14 = $("engine").value === "wan14";
+      const imageToVideo = ["wan14", "ltx25", "animate2"].includes($("engine").value);
+      $("ltxCheck").classList.toggle("show", ltx);
+      $("profileField").style.display = wan14 || ltx ? "block" : "none";
+      if (wan14) {
+        $("generationProfile").innerHTML =
+          '<option value="quality">品質優先 — 20ステップ（既定）</option>' +
+          '<option value="fast">速度優先 — 4ステップLoRA</option>';
+      } else if (ltx) {
+        $("generationProfile").innerHTML =
+          '<option value="comfy">Comfy INT8 — 現行基準</option>' +
+          '<option value="dfr">公式DFR — production quality候補</option>' +
+          '<option value="ti2_hq">公式TI2Vid HQ — guided二段階</option>' +
+          '<option value="ti2_chunked">公式chunked — 10/15秒</option>';
+      } else {
+        $("generationProfile").innerHTML = '<option value="comfy">ComfyUI</option>';
+      }
+      $("imageField").style.display =
+        imageToVideo && !continuationSource ? "block" : "none";
+      $("animateFields").style.display = animate ? "block" : "none";
+      $("imageLabel").textContent = animate ? "正面画像（必須）" : "開始画像";
+      $("imageHint").textContent = animate
+        ? "正面・側面・背面を登録できますが、生成に使うのは下で選ぶ1面だけです。選択面と同じ向きを保つ動作を使用してください。"
+        : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
+      $("shots").options[0].textContent = animate ? "約3秒" : "約5秒";
+      updateProfileHint();
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+    $("generationProfile").addEventListener("change", updateProfileHint);
+
+    $("characterView").addEventListener("change", () => {
+      $("cropAdjustField").style.display =
+        $("characterView").value === "whole" ? "none" : "block";
+      $("cropOffset").value = "0";
+      $("cropScale").value = "100";
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+    $("cropOffset").addEventListener("input", () => {
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+    $("cropScale").addEventListener("input", () => {
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+    $("imageFile").addEventListener("change", () => {
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+    $("existingImage").addEventListener("change", () => {
+      if ($("imageFile").files.length) $("imageFile").value = "";
+      updateCharacterPreview().catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+
+    document.querySelectorAll("[data-quality]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setQualityMode(button.dataset.quality === "quality");
+      });
+    });
+
+    $("jobForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("submitButton").disabled = true;
+      $("error").textContent = "";
+      try {
+        if ($("engine").value === "ltx25" && !$("ltxAck").checked) {
+          throw new Error(
+            "LTX-2.5を使用するには、下の必須ライセンス確認欄をチェックしてください。"
+          );
+        }
+        const continuation = continuationSource;
+        const animate = $("engine").value === "animate2";
+        const imageToVideo =
+          !continuation
+          && ["wan14", "ltx25", "animate2"].includes($("engine").value);
+        const image = imageToVideo
+          ? await uploadImage(animate ? $("characterView").value : null)
+          : null;
+        if (imageToVideo && !image) {
+          throw new Error(animate
+            ? "キャラクター三面図を選択してください。"
+            : "画像を動かすモデルでは開始画像を選択してください。");
+        }
+        const sideImage = animate
+          ? await uploadAdditionalReference("sideImage", "sideFile")
+          : null;
+        const backImage = animate
+          ? await uploadAdditionalReference("backImage", "backFile")
+          : null;
+        const selectedReferences = {
+          front: image, side: sideImage, back: backImage
+        };
+        const primaryImage = animate
+          ? selectedReferences[$("primaryView").value]
+          : image;
+        if (animate && !primaryImage) {
+          throw new Error(
+            `今回使用する${{front: "正面", side: "側面", back: "背面"}[$("primaryView").value]}画像を選択してください。`
+          );
+        }
+        const drivingVideo = animate ? await uploadMotionVideo() : null;
+        const seed = $("seed").value
+          ? Number($("seed").value)
+          : Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+        $("seed").value = String(seed);
+        const payload = {
+          concept: $("concept").value.trim(),
+          engine: $("engine").value,
+          shots: Number($("shots").value),
+          seed,
+          input_image: primaryImage,
+          reference_front: animate ? image : null,
+          reference_side: sideImage,
+          reference_back: backImage,
+          driving_video: drivingVideo,
+          enhance_prompt: $("enhancePrompt").checked,
+          quality_mode: qualityMode,
+          generation_profile: $("generationProfile").value || "comfy",
+          precision_mode: $("engine").value === "wan14"
+            && $("generationProfile").value === "quality",
+          continuation_of: continuation ? continuation.id : null,
+          ltx_license_acknowledged: $("ltxAck").checked
+        };
+        const result = await api("/jobs", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (continuation) clearContinuationMode();
+        watchJob(result.id);
+        await loadRecent();
+      } catch (error) {
+        $("submitButton").disabled = false;
+        $("emptyStage").style.display = "none";
+        $("jobView").classList.add("show");
+        $("error").textContent = error.message;
+      }
+    });
+
+    $("continueJobButton").addEventListener("click", () => {
+      if (currentJob) startContinuation(currentJob);
+    });
+
+    $("clearContinuation").addEventListener("click", () => {
+      clearContinuationMode();
+    });
+
+    $("deleteJobButton").addEventListener("click", () => {
+      if (!activeJob) return;
+      deleteJob(activeJob).catch((error) => {
+        $("error").textContent = error.message;
+      });
+    });
+
+    $("cancelButton").addEventListener("click", async () => {
+      if (!activeJob) return;
+      $("cancelButton").disabled = true;
+      $("cancelButton").textContent = "キャンセル中…";
+      try {
+        await api(`/jobs/${activeJob}/cancel`, { method: "POST" });
+        await refreshJob(activeJob);
+      } catch (error) {
+        $("cancelButton").disabled = false;
+        $("cancelButton").textContent = "生成をキャンセル";
+        $("error").textContent = error.message;
+      }
+    });
+
+    Promise.all([loadHealth(), loadInputs(), loadRecent()]).catch((error) => {
+      $("healthText").textContent = error.message;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,329 @@
+{
+  "job": {
+    "id": "237fdb36-1bbc-4b93-93b0-d59259ff0697",
+    "status": "failed",
+    "engine": "ltx25",
+    "concept": "The same white armored dragon warrior slowly raises the visible hand to chest height while the head, shoulders, torso, hips, and armor preserve the exact coherent three-quarter orientation of the input image; the camera remains completely fixed.",
+    "input_image": "video_wan2_2_14B_i2v_input_image.jpg",
+    "shots": 1,
+    "seed": 20261122,
+    "output_path": null,
+    "error": "QualityGateError: 生成後品質ゲート不合格: semantic.instruction_followed",
+    "created_at": "2026-11-20T22:15:20.910407+00:00",
+    "updated_at": "2026-11-20T22:26:10.541408+00:00",
+    "enhance_prompt": 1,
+    "driving_video": "",
+    "reference_front": "",
+    "reference_side": "",
+    "reference_back": "",
+    "quality_mode": 0,
+    "precision_mode": 0,
+    "continuation_of": "",
+    "backend_id": "ltx",
+    "generation_profile": "ti2_hq",
+    "attempt": 2,
+    "plan": {
+      "title": "White Armored Dragon Warrior Raising Hand",
+      "scene": "Keep the exact subjects, appearance, outfit, setting, lighting, and camera framing of the first frame. One continuous shot with no cuts.",
+      "human_subject": false,
+      "camera_view": "front",
+      "orientation": "preserve the exact coherent object orientation in the input frame",
+      "steps": [
+        "The white armored dragon warrior slowly raises its visible hand to chest height while the head, shoulders, torso, hips, and armor preserve the exact coherent three-quarter orientation of the input image; the camera remains completely fixed"
+      ],
+      "result_states": [
+        "The white armored dragon warrior stands with its visible hand held at chest height. The head, shoulders, torso, hips, and armor maintain the exact coherent three-quarter orientation. The camera remains completely fixed"
+      ],
+      "transitions": [
+        {
+          "initial_state": "exact visible state in the supplied start image",
+          "visible_action": "The white armored dragon warrior slowly raises its visible hand to chest height while the head, shoulders, torso, hips, and armor preserve the exact coherent three-quarter orientation of the input image; the camera remains completely fixed",
+          "result_state": "The white armored dragon warrior stands with its visible hand held at chest height. The head, shoulders, torso, hips, and armor maintain the exact coherent three-quarter orientation. The camera remains completely fixed"
+        }
+      ],
+      "check": {
+        "missing": [],
+        "order_ok": true,
+        "scene_shows_initial_state": true,
+        "state_sequence_ok": true,
+        "orientation_coherent": true,
+        "physical_consistency_ok": true,
+        "scene_initial_state_applicable": false
+      },
+      "audit_attempts": 2,
+      "shots": [
+        {
+          "prompt": "One continuous medium-wide fixed-camera shot. Keep the exact subjects, appearance, outfit, setting, lighting, and camera framing of the first frame. One continuous shot with no cuts. Natural subject orientation: preserve the exact coherent object orientation in the input frame. Every object keeps one coherent shape, orientation, count, and contact with the scene unless the requested action visibly changes it. Action: The white armored dragon warrior slowly raises its visible hand to chest height while the head, shoulders, torso, hips, and armor preserve the exact coherent three-quarter orientation of the input image; the camera remains completely fixed. End state: The white armored dragon warrior stands with its visible hand held at chest height. The head, shoulders, torso, hips, and armor maintain the exact coherent three-quarter orientation. The camera remains completely fixed. No cut, transition, reset, sudden zoom, duplicate object, or unrelated action.",
+          "steps": [
+            1
+          ]
+        }
+      ]
+    },
+    "quality": {
+      "gate": "aggregate",
+      "issues": [
+        {
+          "code": "semantic.instruction_followed",
+          "message": "The audit found that the requested instruction was not followed",
+          "gate": "semantic",
+          "hard": true,
+          "details": {
+            "confidence": 0.95,
+            "evidence": [
+              "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+              "However, the camera is not fixed. The framing changes significantly between frames; the character appears to zoom out or move further away as the sequence progresses (compare frame 1 to frame 12). This violates the 'camera remains completely fixed' constraint."
+            ],
+            "corrective_prompt": "The camera must remain completely static and fixed in position throughout the entire video. Do not zoom, pan, or change the framing of the shot at any point."
+          }
+        }
+      ],
+      "metrics": {
+        "reports": [
+          {
+            "gate": "technical",
+            "passed": true,
+            "metrics": {
+              "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+              "duration": 5.041667,
+              "fps": 24.0,
+              "width": 960,
+              "height": 576
+            }
+          },
+          {
+            "gate": "temporal",
+            "passed": true,
+            "metrics": {
+              "black_intervals": [],
+              "freeze_intervals": [],
+              "min_black_duration": 0.5,
+              "min_freeze_duration": 2.0
+            }
+          },
+          {
+            "gate": "semantic",
+            "passed": false,
+            "metrics": {
+              "audit": {
+                "anatomy_valid": true,
+                "front_back_fusion_absent": true,
+                "orientation_consistent": true,
+                "instruction_followed": false,
+                "identity_consistent": true,
+                "confidence": 0.95,
+                "evidence": [
+                  "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+                  "However, the camera is not fixed. The framing changes significantly between frames; the character appears to zoom out or move further away as the sequence progresses (compare frame 1 to frame 12). This violates the 'camera remains completely fixed' constraint."
+                ],
+                "corrective_prompt": "The camera must remain completely static and fixed in position throughout the entire video. Do not zoom, pan, or change the framing of the shot at any point."
+              },
+              "confidence_threshold": 0.75,
+              "contact_sheet": "jobs/237fdb36-1bbc-4b93-93b0-d59259ff0697/quality_attempt_2_contact.png",
+              "reference_image": "video_wan2_2_14B_i2v_input_image.jpg"
+            }
+          }
+        ]
+      },
+      "passed": false,
+      "hard_failed": true,
+      "attempts": [
+        {
+          "segment": 1,
+          "attempt": 1,
+          "output": "jobs/237fdb36-1bbc-4b93-93b0-d59259ff0697/attempt_1_ltx_ti2_hq.mp4",
+          "report": {
+            "gate": "aggregate",
+            "issues": [
+              {
+                "code": "semantic.instruction_followed",
+                "message": "The audit found that the requested instruction was not followed",
+                "gate": "semantic",
+                "hard": true,
+                "details": {
+                  "confidence": 0.95,
+                  "evidence": [
+                    "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+                    "However, the camera is not fixed. The framing changes significantly between the first frame (a close-up) and subsequent frames (a wider shot), indicating camera movement or zooming rather than a completely fixed camera."
+                  ],
+                  "corrective_prompt": "The camera must remain completely fixed in position and focal length throughout the entire video. Do not zoom, pan, or change the framing at any point."
+                }
+              }
+            ],
+            "metrics": {
+              "reports": [
+                {
+                  "gate": "technical",
+                  "passed": true,
+                  "metrics": {
+                    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                    "duration": 5.041667,
+                    "fps": 24.0,
+                    "width": 960,
+                    "height": 576
+                  }
+                },
+                {
+                  "gate": "temporal",
+                  "passed": true,
+                  "metrics": {
+                    "black_intervals": [],
+                    "freeze_intervals": [],
+                    "min_black_duration": 0.5,
+                    "min_freeze_duration": 2.0
+                  }
+                },
+                {
+                  "gate": "semantic",
+                  "passed": false,
+                  "metrics": {
+                    "audit": {
+                      "anatomy_valid": true,
+                      "front_back_fusion_absent": true,
+                      "orientation_consistent": true,
+                      "instruction_followed": false,
+                      "identity_consistent": true,
+                      "confidence": 0.95,
+                      "evidence": [
+                        "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+                        "However, the camera is not fixed. The framing changes significantly between the first frame (a close-up) and subsequent frames (a wider shot), indicating camera movement or zooming rather than a completely fixed camera."
+                      ],
+                      "corrective_prompt": "The camera must remain completely fixed in position and focal length throughout the entire video. Do not zoom, pan, or change the framing at any point."
+                    },
+                    "confidence_threshold": 0.75,
+                    "contact_sheet": "jobs/237fdb36-1bbc-4b93-93b0-d59259ff0697/quality_attempt_1_contact.png",
+                    "reference_image": "video_wan2_2_14B_i2v_input_image.jpg"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "segment": 1,
+          "attempt": 2,
+          "output": "jobs/237fdb36-1bbc-4b93-93b0-d59259ff0697/attempt_2_ltx_ti2_hq.mp4",
+          "report": {
+            "gate": "aggregate",
+            "issues": [
+              {
+                "code": "semantic.instruction_followed",
+                "message": "The audit found that the requested instruction was not followed",
+                "gate": "semantic",
+                "hard": true,
+                "details": {
+                  "confidence": 0.95,
+                  "evidence": [
+                    "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+                    "However, the camera is not fixed. The framing changes significantly between frames; the character appears to zoom out or move further away as the sequence progresses (compare frame 1 to frame 12). This violates the 'camera remains completely fixed' constraint."
+                  ],
+                  "corrective_prompt": "The camera must remain completely static and fixed in position throughout the entire video. Do not zoom, pan, or change the framing of the shot at any point."
+                }
+              }
+            ],
+            "metrics": {
+              "reports": [
+                {
+                  "gate": "technical",
+                  "passed": true,
+                  "metrics": {
+                    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                    "duration": 5.041667,
+                    "fps": 24.0,
+                    "width": 960,
+                    "height": 576
+                  }
+                },
+                {
+                  "gate": "temporal",
+                  "passed": true,
+                  "metrics": {
+                    "black_intervals": [],
+                    "freeze_intervals": [],
+                    "min_black_duration": 0.5,
+                    "min_freeze_duration": 2.0
+                  }
+                },
+                {
+                  "gate": "semantic",
+                  "passed": false,
+                  "metrics": {
+                    "audit": {
+                      "anatomy_valid": true,
+                      "front_back_fusion_absent": true,
+                      "orientation_consistent": true,
+                      "instruction_followed": false,
+                      "identity_consistent": true,
+                      "confidence": 0.95,
+                      "evidence": [
+                        "The contact sheet shows the warrior's hand moving from a lower position to chest height across the frames, which correctly follows the instruction.",
+                        "However, the camera is not fixed. The framing changes significantly between frames; the character appears to zoom out or move further away as the sequence progresses (compare frame 1 to frame 12). This violates the 'camera remains completely fixed' constraint."
+                      ],
+                      "corrective_prompt": "The camera must remain completely static and fixed in position throughout the entire video. Do not zoom, pan, or change the framing of the shot at any point."
+                    },
+                    "confidence_threshold": 0.75,
+                    "contact_sheet": "jobs/237fdb36-1bbc-4b93-93b0-d59259ff0697/quality_attempt_2_contact.png",
+                    "reference_image": "video_wan2_2_14B_i2v_input_image.jpg"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "continuation": null,
+    "output_url": null
+  },
+  "events": [
+    {
+      "stage": "queued",
+      "message": "Job accepted",
+      "created_at": "2026-11-20T22:15:20.910407+00:00"
+    },
+    {
+      "stage": "planning",
+      "message": "Planning with qwen3.6:35b-a3b-q8_0",
+      "created_at": "2026-11-20T22:15:20.928810+00:00"
+    },
+    {
+      "stage": "steps",
+      "message": "工程: 1) The white armored dragon warrior slowly raises its visible hand to chest height while the head, shoulders, torso, hips, and armor preserve the exact coherent three-quarter orientation of the input image; the camera remains completely fixed",
+      "created_at": "2026-11-20T22:15:40.064798+00:00"
+    },
+    {
+      "stage": "generating",
+      "message": "Generating with official LTX profile ti2_hq, attempt 1",
+      "created_at": "2026-11-20T22:15:40.073104+00:00"
+    },
+    {
+      "stage": "validating",
+      "message": "Validating generated attempt 1",
+      "created_at": "2026-11-20T22:20:38.521725+00:00"
+    },
+    {
+      "stage": "quality_retry",
+      "message": "Quality gate rejected the first LTX attempt; regenerating once",
+      "created_at": "2026-11-20T22:20:54.234707+00:00"
+    },
+    {
+      "stage": "generating",
+      "message": "Generating with official LTX profile ti2_hq, attempt 2",
+      "created_at": "2026-11-20T22:20:54.248035+00:00"
+    },
+    {
+      "stage": "validating",
+      "message": "Validating generated attempt 2",
+      "created_at": "2026-11-20T22:25:54.669813+00:00"
+    },
+    {
+      "stage": "failed",
+      "message": "QualityGateError: 生成後品質ゲート不合格: semantic.instruction_followed",
+      "created_at": "2026-11-20T22:26:10.541552+00:00"
+    }
+  ],
+  "elapsed_seconds": 645.5245168707334,
+  "host_total_memory_bytes": 130660974592,
+  "minimum_mem_available_bytes": 73546448896,
+  "peak_host_memory_used_bytes": 57114525696
+}

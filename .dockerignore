@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!Dockerfile.ltx
+!config/
+!config/comfyui-manager.ini
+!workers/
+!workers/ltx/
+!workers/ltx/**

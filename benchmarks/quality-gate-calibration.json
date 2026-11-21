@@ -1,0 +1,121 @@
+{
+  "generated_at": "2026-11-20T15:05:38.147090+00:00",
+  "fixtures_are_synthetic_general_video": true,
+  "expected": {
+    "moving": true,
+    "frozen": false,
+    "black": false
+  },
+  "results": {
+    "moving": {
+      "path": "quality-fixtures/moving.mp4",
+      "duration": 5.0,
+      "report": {
+        "gate": "temporal",
+        "issues": [],
+        "metrics": {
+          "black_intervals": [],
+          "freeze_intervals": [],
+          "min_black_duration": 0.5,
+          "min_freeze_duration": 2.0
+        }
+      },
+      "passed": true
+    },
+    "frozen": {
+      "path": "quality-fixtures/frozen.mp4",
+      "duration": 5.0,
+      "report": {
+        "gate": "temporal",
+        "issues": [
+          {
+            "code": "temporal.frozen_video",
+            "message": "The video contains an excessive frozen interval",
+            "gate": "temporal",
+            "hard": true,
+            "details": {
+              "intervals": [
+                {
+                  "start": 0.0,
+                  "end": 5.0,
+                  "duration": 5.0
+                }
+              ]
+            }
+          }
+        ],
+        "metrics": {
+          "black_intervals": [],
+          "freeze_intervals": [
+            {
+              "start": 0.0,
+              "end": 5.0,
+              "duration": 5.0
+            }
+          ],
+          "min_black_duration": 0.5,
+          "min_freeze_duration": 2.0
+        }
+      },
+      "passed": false
+    },
+    "black": {
+      "path": "quality-fixtures/black.mp4",
+      "duration": 5.0,
+      "report": {
+        "gate": "temporal",
+        "issues": [
+          {
+            "code": "temporal.black_frames",
+            "message": "The video contains an excessive black interval",
+            "gate": "temporal",
+            "hard": true,
+            "details": {
+              "intervals": [
+                {
+                  "start": 0.0,
+                  "end": 4.95833,
+                  "duration": 4.95833
+                }
+              ]
+            }
+          },
+          {
+            "code": "temporal.frozen_video",
+            "message": "The video contains an excessive frozen interval",
+            "gate": "temporal",
+            "hard": true,
+            "details": {
+              "intervals": [
+                {
+                  "start": 0.0,
+                  "end": 5.0,
+                  "duration": 5.0
+                }
+              ]
+            }
+          }
+        ],
+        "metrics": {
+          "black_intervals": [
+            {
+              "start": 0.0,
+              "end": 4.95833,
+              "duration": 4.95833
+            }
+          ],
+          "freeze_intervals": [
+            {
+              "start": 0.0,
+              "end": 5.0,
+              "duration": 5.0
+            }
+          ],
+          "min_black_duration": 0.5,
+          "min_freeze_duration": 2.0
+        }
+      },
+      "passed": false
+    }
+  }
+}

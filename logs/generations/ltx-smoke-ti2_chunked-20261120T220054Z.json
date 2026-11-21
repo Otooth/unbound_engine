@@ -1,0 +1,53 @@
+{
+  "started_at": "2026-11-20T22:00:54.865520+00:00",
+  "finished_at": "2026-11-20T22:06:47.448110+00:00",
+  "elapsed_seconds": 352.5820852010511,
+  "host_total_memory_bytes": 130660974592,
+  "minimum_mem_available_bytes": 71023472640,
+  "peak_host_memory_used_bytes": 59637501952,
+  "request": {
+    "profile": "ti2_chunked",
+    "input_path": null,
+    "output_path": "jobs/ltx-smoke-ti2_chunked-20261120T220054Z/output.mp4",
+    "prompt": "A matte blue ball rolls slowly from left to right across a plain wooden table under soft daylight while the camera remains fixed.",
+    "negative": "scene cut, text, watermark, duplicate objects, deformed geometry",
+    "seed": 20261121,
+    "width": 256,
+    "height": 256,
+    "frames": 105,
+    "fps": 24
+  },
+  "worker_health": {
+    "status": "ok",
+    "active_job_id": null,
+    "offline": true,
+    "ltx_commit": "daa6b16fc7f0f1628f2c9e36a303e3312b333cc6",
+    "ltx_pipelines_version": "1.6.2",
+    "profiles_ready": {
+      "ti2_hq": true,
+      "dfr": false,
+      "ti2_chunked": true
+    }
+  },
+  "job": {
+    "id": "f616cb0a-ac7e-4928-964f-f2cedc51fb3a",
+    "status": "succeeded",
+    "request": {
+      "profile": "ti2_chunked",
+      "input_path": null,
+      "output_path": "/data/output/jobs/ltx-smoke-ti2_chunked-20261120T220054Z/output.mp4",
+      "prompt": "A matte blue ball rolls slowly from left to right across a plain wooden table under soft daylight while the camera remains fixed.",
+      "negative": "scene cut, text, watermark, duplicate objects, deformed geometry",
+      "seed": 20261121,
+      "width": 256,
+      "height": 256,
+      "frames": 105,
+      "fps": 24.0
+    },
+    "created_at": "2026-11-20T22:00:54.866556+00:00",
+    "started_at": "2026-11-20T22:00:54.866843+00:00",
+    "finished_at": "2026-11-20T22:06:47.295310+00:00",
+    "return_code": 0,
+    "error": null
+  }
+}

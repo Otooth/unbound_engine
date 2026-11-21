@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Unbound Engine</title>
+  <defs>
+    <linearGradient id="orbit" x1="96" y1="100" x2="420" y2="410" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B5CFF"/>
+      <stop offset=".48" stop-color="#716EFF"/>
+      <stop offset="1" stop-color="#36DDD0"/>
+    </linearGradient>
+    <linearGradient id="core" x1="174" y1="174" x2="344" y2="344" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#AF64FF"/>
+      <stop offset=".52" stop-color="#F1E9FF"/>
+      <stop offset="1" stop-color="#36DDE2"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" values="1 0 0 0 .42 0 1 0 0 .45 0 0 1 0 1 0 0 0 .5 0"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="256" cy="256" r="181" fill="none" stroke="url(#orbit)" stroke-width="42"
+    stroke-linecap="round" stroke-dasharray="990 148" transform="rotate(-39 256 256)"/>
+  <path fill="url(#core)" filter="url(#glow)"
+    d="M256 151C271 217 295 241 361 256C295 271 271 295 256 361C241 295 217 271 151 256C217 241 241 217 256 151Z"/>
+  <circle cx="256" cy="256" r="13" fill="#FFFFFF"/>
+</svg>

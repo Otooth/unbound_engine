@@ -1,0 +1,53 @@
+{
+  "started_at": "2026-11-21T01:31:32.917993+00:00",
+  "finished_at": "2026-11-21T01:33:11.056643+00:00",
+  "elapsed_seconds": 98.13820257876068,
+  "host_total_memory_bytes": 130660974592,
+  "minimum_mem_available_bytes": 72800600064,
+  "peak_host_memory_used_bytes": 57860374528,
+  "request": {
+    "profile": "dfr",
+    "input_path": "video_wan2_2_14B_i2v_input_image.jpg",
+    "output_path": "jobs/ltx-smoke-dfr-20261121T013132Z/output.mp4",
+    "prompt": "The white dragon warrior stands still, eyes full of determination and strength. The camera slowly moves closer or circles around the warrior, highlighting the powerful presence and heroic spirit of the character.",
+    "negative": null,
+    "seed": 314159,
+    "width": 640,
+    "height": 640,
+    "frames": 81,
+    "fps": 16.0
+  },
+  "worker_health": {
+    "status": "ok",
+    "active_job_id": null,
+    "offline": true,
+    "ltx_commit": "daa6b16fc7f0f1628f2c9e36a303e3312b333cc6",
+    "ltx_pipelines_version": "1.6.2",
+    "profiles_ready": {
+      "ti2_hq": true,
+      "dfr": true,
+      "ti2_chunked": true
+    }
+  },
+  "job": {
+    "id": "dc593f63-c036-4c65-90a7-f5042ea88627",
+    "status": "succeeded",
+    "request": {
+      "profile": "dfr",
+      "input_path": "/data/input/video_wan2_2_14B_i2v_input_image.jpg",
+      "output_path": "/data/output/jobs/ltx-smoke-dfr-20261121T013132Z/output.mp4",
+      "prompt": "The white dragon warrior stands still, eyes full of determination and strength. The camera slowly moves closer or circles around the warrior, highlighting the powerful presence and heroic spirit of the character.",
+      "negative": null,
+      "seed": 314159,
+      "width": 640,
+      "height": 640,
+      "frames": 81,
+      "fps": 16.0
+    },
+    "created_at": "2026-11-21T01:31:32.928947+00:00",
+    "started_at": "2026-11-21T01:31:32.930003+00:00",
+    "finished_at": "2026-11-21T01:33:10.825415+00:00",
+    "return_code": 0,
+    "error": null
+  }
+}

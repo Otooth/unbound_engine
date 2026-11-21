@@ -1,0 +1,68 @@
+{
+  "prompt_id": "40ab8f5f-a7c3-4918-af79-948b4bf28b58",
+  "queued_at": "2026-11-21T01:30:40.225802+00:00",
+  "elapsed_seconds": 44.30414013378322,
+  "workflow": "workflows/compare_ltx2_5_i2v.api.json",
+  "overrides": {
+    "seed": 314159,
+    "filename_prefix": "video/benchmark_ltx_comfy_seed314159"
+  },
+  "host_min_available_bytes": 71143682048,
+  "host_peak_used_bytes": 59517292544,
+  "comfy_min_vram_free_bytes": 10781422080,
+  "outputs": {
+    "398:381": {
+      "text": [
+        "The white dragon warrior stands still, eyes full of determination and strength. The camera slowly moves closer or circles around the warrior, highlighting the powerful presence and heroic spirit of the character."
+      ]
+    },
+    "75": {
+      "images": [
+        {
+          "filename": "benchmark_ltx_comfy_seed314159_00001_.mp4",
+          "subfolder": "video",
+          "type": "output",
+          "metadata": {
+            "kind": "video",
+            "width": 640,
+            "height": 640,
+            "duration": 5.0625,
+            "fps": 16.0,
+            "frame_count": 81
+          }
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  },
+  "status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "40ab8f5f-a7c3-4918-af79-948b4bf28b58",
+          "timestamp": 1795224640360
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "40ab8f5f-a7c3-4918-af79-948b4bf28b58",
+          "timestamp": 1795224640368
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "40ab8f5f-a7c3-4918-af79-948b4bf28b58",
+          "timestamp": 1795224683165
+        }
+      ]
+    ]
+  }
+}
