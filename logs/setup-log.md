@@ -929,3 +929,35 @@ Git 履歴（`936987e`〜`cb72aa6`）は残しており、作業ツリーだけ�
 | API 再起動 | 127.0.0.1:8001 | 起動・待受確認 ✅ |
 
 未確認: 失敗した2件の依頼文は削除済みで、元のプロンプトそのものでの再現・回避確認はしていない。
+
+## 2026-11-22 画像生成（Z-Image Turbo）と「この画像から動画を作る」
+
+- ユーザー選択: Z-Image Turbo bf16、画像生成＋動画への連携まで。
+- モデル: `Comfy-Org/z_image_turbo` @ `6fc90a3b…`、Apache-2.0（配布元・元モデルとも）。
+  3ファイル 20,690,152,836 bytes。サイズと SHA256 は HF tree API の LFS oid。
+- ワークフロー: 公式 `image_z_image_turbo.json`（templates-json 0.1.131）を
+  `workflows/` へ保存し、同じ構成の API 版 `image_z_image_turbo.api.json` を作成
+  （8ステップ、cfg 1、res_multistep / simple、AuraFlow shift 3）。
+- 実装: エンジン `zimage`、DB 列 `image_size`（square 1024², landscape 1280×720,
+  portrait 720×1280）、Qwen による静止画プロンプト変換、PNG のメタデータ除去、
+  `input/generated-JOB_ID.png` への登録、UI の画像表示と「この画像から動画を作る」、
+  削除時の生成画像の片付けと使用中ジョブがある場合の 409。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `getent hosts huggingface.co` / `curl https://1.1.1.1` | 外部接続 | ❌ ホストがオフライン。モデルは未ダウンロード |
+| API版ワークフローを ComfyUI `/prompt` で検証 | モデル未取得以外のエラーなし | エラーは unet/clip/vae の `value_not_in_list` の3件のみ ✅ |
+| tEXt（prompt/workflow）付き PNG を `ffmpeg -map_metadata -1` | テキストチャンク除去 | `IHDR,tEXt,tEXt,IDAT,IEND` → `IHDR,pHYs,IDAT,IEND`、prompt 文字列なし ✅ |
+| `create_image_prompt` を実 Qwen で2件 | 依頼にない要素を足さない英語プロンプト | 9.2秒・2.6秒で成功 ✅ |
+| `POST /jobs` に zimage + shots=2 / precision / 不正サイズ | 422 | 3件とも 422 ✅ |
+| ブラウザーで Z-Image を選択 | 縦横比表示、動画用項目非表示、「画像を生成」 | 確認 ✅ |
+| 一時的な完成画像ジョブで「この画像から動画を作る」 | Wan 14B、開始画像に generated-… を選択 | `engine=wan14`、`existingImage=generated-c831b9ff-….png` ✅ |
+| 待機中の動画が使用中の生成画像を `DELETE` | 409 | 409 ✅ |
+| 一時ジョブを `DELETE` | DB・出力・input コピーが消える | 行・イベント・`output/jobs/…`・`input/generated-…` とも削除 ✅ |
+
+未確認: 実モデルでの画像生成（所要時間・ピークメモリ・画質）と、生成画像からの
+動画生成の通し確認。確認方法: ネットワーク接続後に
+`hf-env/bin/python scripts/download-models.py zimage` を実行し、UI から1枚生成して
+Wan 14B で動画化する。

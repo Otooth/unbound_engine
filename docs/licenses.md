@@ -23,6 +23,19 @@
 - 動作元動画に第三者を使用する場合は、モデルライセンスとは別に、
   本人の同意、肖像権、著作権を確認すること。
 
+## Z-Image Turbo（2026-11-22 確認）
+
+- 配布元: `Comfy-Org/z_image_turbo`（固定revision:
+  `6fc90a3b1b653e935a0d175e260736de25b84df5`）
+- 元モデル: `Tongyi-MAI/Z-Image-Turbo`
+- Hugging Faceモデルカード上のライセンス: 配布元・元モデルとも Apache-2.0
+- モデルカード: <https://huggingface.co/Comfy-Org/z_image_turbo>、
+  <https://huggingface.co/Tongyi-MAI/Z-Image-Turbo>
+- 未確認: Apache-2.0 以外の追加利用規約（Acceptable Use 等）の有無。
+  確認方法: 元モデルの README・LICENSE 原文を取得して確認する。
+- 実在人物・第三者の作品に似た画像を生成して動画化する場合は、モデルの
+  ライセンスとは別に、本人の同意・肖像権・著作権を確認すること。
+
 ## LTX-2.5
 
 - 配布元: `Lightricks/LTX-2.5`

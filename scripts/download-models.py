@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download pinned Wan 2.2 and LTX-2.5 model profiles and verify them."""
+"""Download pinned Wan 2.2, LTX-2.5, and Z-Image model profiles and verify them."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ LTX_REPO = "Lightricks/LTX-2.5"
 LTX_REVISION = "49b093a39c19169a8a81721dcc541e07e945232f"
 ANIMATE_REPO = "Comfy-Org/Wan-Animate-2"
 ANIMATE_REVISION = "e7181fe1896b7f2ce34120d1a3663413548240d7"
+ZIMAGE_REPO = "Comfy-Org/z_image_turbo"
+ZIMAGE_REVISION = "6fc90a3b1b653e935a0d175e260736de25b84df5"
 
 PROFILES = {
     "wan5b": (
@@ -161,6 +163,32 @@ PROFILES = {
             "vae/Wan2_1_VAE_bf16.safetensors",
             253_806_278,
             "1ab9a32cc2c740f6e39d80d367ce5dcc28db8c71b79b28670546b8973e9d75f9",
+        ),
+    ),
+    "zimage": (
+        (
+            ZIMAGE_REPO,
+            ZIMAGE_REVISION,
+            "split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+            "diffusion_models/z_image_turbo_bf16.safetensors",
+            12_309_866_400,
+            "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+        ),
+        (
+            ZIMAGE_REPO,
+            ZIMAGE_REVISION,
+            "split_files/text_encoders/qwen_3_4b.safetensors",
+            "text_encoders/qwen_3_4b.safetensors",
+            8_044_982_048,
+            "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+        ),
+        (
+            ZIMAGE_REPO,
+            ZIMAGE_REVISION,
+            "split_files/vae/ae.safetensors",
+            "vae/ae.safetensors",
+            335_304_388,
+            "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
         ),
     ),
 }

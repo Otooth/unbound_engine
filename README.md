@@ -11,6 +11,7 @@ ComfyUI is published only on `127.0.0.1:8188`.
 - Wan 2.2 I2V-14B FP8 scaled + LightX2V 4-step LoRA
 - Wan Animate 2 distilled 14B INT8 ConvRot
 - LTX-2.5 distilled Transformer/Text Encoder INT8 ConvRot
+- Z-Image Turbo BF16 text-to-image (workflow pinned; model download pending)
 - Official 1280×704, 121-frame, 24 fps workflow
 - Container build and source revisions pinned in `versions.lock`
 - ComfyUI-Manager configured with `network_mode = offline`
@@ -42,6 +43,7 @@ hf-env/bin/python scripts/download-models.py
 hf-env/bin/python scripts/download-models.py wan14
 hf-env/bin/python scripts/download-models.py ltx25
 hf-env/bin/python scripts/download-models.py animate2
+hf-env/bin/python scripts/download-models.py zimage
 ```
 
 The downloader uses pinned Hugging Face revisions, verifies file size and
@@ -107,6 +109,27 @@ Choose the engine by input type:
   neutral human motion guide from the requested action.
 - `ltx25`: image-to-video with audio. A matching image and license
   acknowledgement are required.
+- `zimage`: text-to-image with Z-Image Turbo (8 steps). Choose
+  `"image_size": "square"` (1024×1024, matches Wan 14B and Animate),
+  `"landscape"` (1280×720), or `"portrait"` (720×1280) for LTX-2.5.
+
+### Generate an image, then animate it
+
+1. Select **Z-Image Turbo — 文章から画像** and generate. Qwen rewrites the
+   request as one English still-image prompt that keeps every subject fully in
+   frame as a stable first frame (disable prompt enhancement to send it
+   verbatim).
+2. The PNG is re-written with FFmpeg `-map_metadata -1`, which removes the
+   embedded ComfyUI prompt/workflow text chunks, and saved as
+   `output/jobs/JOB_ID/image.png`. A copy named `generated-JOB_ID.png` is
+   registered in `input/`.
+3. Choose **この画像から動画を作る**. The form switches to Wan 14B with that
+   image selected as the start image; LTX-2.5 or Wan Animate 2 can be chosen
+   instead. Via the API, pass `"input_image": "generated-JOB_ID.png"`.
+
+Deleting an image job also removes `generated-JOB_ID.png`. Deletion is refused
+while a queued or running video still uses that image. Download the model with
+`hf-env/bin/python scripts/download-models.py zimage` (about 20.7 GB).
 
 Prompt enhancement is enabled by default and is constrained to preserve
 character count, age, build, and reciprocal actions. Disable it to send the

@@ -130,8 +130,8 @@
     .job-view { display: none; }
     .job-view.show { display: block; }
     .video-wrap { aspect-ratio: 1; background: #050609; display: grid; place-items: center; }
-    video { width: 100%; height: 100%; object-fit: contain; display: none; }
-    video.show { display: block; }
+    video, .result-image { width: 100%; height: 100%; object-fit: contain; display: none; }
+    video.show, .result-image.show { display: block; }
     .progress-area { padding: 20px 22px 22px; }
     .status-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .status-name { font-weight: 700; font-size: 15px; }
@@ -198,15 +198,25 @@
           </div>
           <div class="row">
             <div class="field">
-              <label for="engine">動画モデル</label>
+              <label for="engine">生成モデル</label>
               <select id="engine">
                 <option value="wan5b">Wan 2.2 5B — 文章から動画</option>
                 <option value="animate2">Wan Animate 2 — 登録した1面を動かす</option>
                 <option value="wan14">Wan 2.2 14B — 画像を動かす</option>
                 <option value="ltx25">LTX-2.5 — 画像を動かす・音声付き</option>
+                <option value="zimage">Z-Image Turbo — 文章から画像（動画の開始画像に使える）</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field" id="imageSizeField" style="display:none">
+              <label for="imageSize">画像の縦横比</label>
+              <select id="imageSize">
+                <option value="square">正方形 1024×1024 — Wan 14B・Wan Animate向け</option>
+                <option value="landscape">横長 1280×720 — LTX-2.5向け</option>
+                <option value="portrait">縦長 720×1280 — LTX-2.5向け</option>
+              </select>
+              <div class="hint">Wan 14Bは正方形で出力するため、正方形の画像なら切り抜きや引き伸ばしが起きません。</div>
+            </div>
+            <div class="field" id="shotsField">
               <label for="shots">動画の長さ</label>
               <select id="shots">
                 <option value="1">約5秒</option>
@@ -279,7 +289,7 @@
               <div class="hint">指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。</div>
             </div>
           </div>
-          <div class="field">
+          <div class="field" id="qualityField">
             <label>生成品質</label>
             <div class="mode-switch">
               <button type="button" class="mode-option active" data-quality="normal">標準・高速</button>
@@ -313,7 +323,10 @@
           <div><strong>ここに完成動画が表示されます</strong>左の内容を入力して「動画を生成」を押してください。</div>
         </div>
         <div class="job-view" id="jobView">
-          <div class="video-wrap"><video id="resultVideo" controls playsinline></video></div>
+          <div class="video-wrap">
+            <video id="resultVideo" controls playsinline></video>
+            <img id="resultImage" class="result-image" alt="生成した画像">
+          </div>
           <div class="progress-area">
             <div class="status-line">
               <span class="status-name" id="statusName">準備中</span>
@@ -323,7 +336,8 @@
             <div class="events" id="events"></div>
             <button class="cancel-button" id="cancelButton" type="button">生成をキャンセル</button>
             <button class="continue-button" id="continueJobButton" type="button">この動画の続きを作る</button>
-            <button class="cancel-button" id="deleteJobButton" type="button">この履歴と動画を削除</button>
+            <button class="continue-button" id="imageToVideoButton" type="button">この画像から動画を作る</button>
+            <button class="cancel-button" id="deleteJobButton" type="button">この履歴と生成物を削除</button>
             <div class="error" id="error"></div>
           </div>
         </div>
@@ -344,6 +358,15 @@
       finishing: "動画を仕上げ中", extending: "元動画と続きを連結中",
       succeeded: "完成", failed: "失敗",
       cancelled: "キャンセル済み"
+    };
+    const imageStatusLabels = {
+      generating: "画像を生成中", finishing: "画像を仕上げ中"
+    };
+    const stageLabel = (stage, job) =>
+      (job?.engine === "zimage" && imageStatusLabels[stage]) || statusLabels[stage];
+    const engineNames = {
+      wan5b: "Wan 5B", wan14: "Wan 14B", ltx25: "LTX-2.5",
+      animate2: "Wan Animate 2", zimage: "Z-Image 画像"
     };
     const progress = { queued: 8, planning: 18, motion: 42, generating: 72, continuing: 78, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
     let activeJob = null;
@@ -533,23 +556,39 @@
       currentJob = job;
       $("emptyStage").style.display = "none";
       $("jobView").classList.add("show");
-      $("statusName").textContent = statusLabels[job.status] || job.status;
+      $("statusName").textContent = stageLabel(job.status, job) || job.status;
       $("progressBar").style.width = `${progress[job.status] || 5}%`;
       $("statusTime").textContent = new Date(job.updated_at).toLocaleTimeString("ja-JP");
       $("events").innerHTML = events.map((event) =>
-        `<div class="event">${escapeHtml(statusLabels[event.stage] || event.message)}</div>`
+        `<div class="event">${escapeHtml(stageLabel(event.stage, job) || event.message)}</div>`
       ).join("");
       $("error").textContent = job.status === "failed" ? job.error || "" : "";
       const video = $("resultVideo");
-      if (job.status === "succeeded" && job.output_url) {
+      const image = $("resultImage");
+      const done = job.status === "succeeded" && job.output_url;
+      const isImage = job.output_type === "image";
+      if (done && !isImage) {
         if (video.dataset.path !== job.output_url) {
           video.src = job.output_url;
           video.dataset.path = job.output_url;
         }
         video.classList.add("show");
       } else {
+        video.pause();
         video.classList.remove("show");
       }
+      if (done && isImage) {
+        if (image.dataset.path !== job.output_url) {
+          image.src = job.output_url;
+          image.dataset.path = job.output_url;
+        }
+        image.classList.add("show");
+      } else {
+        image.classList.remove("show");
+      }
+      $("imageToVideoButton").classList.toggle(
+        "show", Boolean(done && isImage && job.generated_input)
+      );
       const terminal = ["succeeded", "failed", "cancelled"].includes(job.status);
       $("submitButton").disabled = !terminal;
       $("cancelButton").classList.toggle("show", !terminal);
@@ -587,13 +626,13 @@
       $("recentJobs").innerHTML = jobs.map((job) => `
         <div class="job-card" data-job="${job.id}" role="button" tabindex="0">
           <div class="card-head">
-            <span class="pill ${job.status}">${escapeHtml(statusLabels[job.status] || job.status)}</span>
+            <span class="pill ${job.status}">${escapeHtml(stageLabel(job.status, job) || job.status)}</span>
             ${["succeeded", "failed", "cancelled"].includes(job.status)
-              ? `<button class="delete-job" type="button" data-delete="${job.id}" title="履歴と動画を削除">削除</button>`
+              ? `<button class="delete-job" type="button" data-delete="${job.id}" title="履歴と生成物を削除">削除</button>`
               : ""}
           </div>
           <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60))}</div>
-          <div class="meta">${job.engine === "ltx25" ? "LTX-2.5" : job.engine === "wan14" ? "Wan 14B" : job.engine === "animate2" ? "Wan Animate 2" : "Wan 5B"}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 画質優先" : ""}${job.precision_mode ? " · 精度優先" : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
+          <div class="meta">${escapeHtml(engineNames[job.engine] || job.engine)}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 画質優先" : ""}${job.precision_mode ? " · 精度優先" : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
         </div>`).join("") || '<div class="hint">まだ履歴はありません。</div>';
       document.querySelectorAll("[data-job]").forEach((card) => {
         card.addEventListener("click", () => watchJob(card.dataset.job));
@@ -612,7 +651,7 @@
     }
 
     async function deleteJob(id) {
-      if (!confirm("この履歴と生成動画・中間ファイルを削除します。元に戻せません。削除しますか？")) return;
+      if (!confirm("この履歴と生成した動画・画像・中間ファイルを削除します。元に戻せません。削除しますか？")) return;
       await api(`/jobs/${id}`, { method: "DELETE" });
       if (activeJob === id) {
         clearInterval(pollTimer);
@@ -623,6 +662,8 @@
         video.removeAttribute("src");
         video.dataset.path = "";
         video.load();
+        $("resultImage").removeAttribute("src");
+        $("resultImage").dataset.path = "";
         $("jobView").classList.remove("show");
         $("emptyStage").style.display = "";
         $("submitButton").disabled = false;
@@ -675,10 +716,40 @@
       $("engine").dispatchEvent(new Event("change"));
     }
 
+    function startImageToVideo(job) {
+      if (continuationSource) clearContinuationMode();
+      $("engine").value = "wan14";
+      $("engine").dispatchEvent(new Event("change"));
+      $("imageFile").value = "";
+      loadInputs(job.generated_input).then(() => {
+        $("existingImage").value = job.generated_input;
+        return updateCharacterPreview();
+      }).catch((error) => {
+        $("error").textContent = error.message;
+      });
+      $("formTitle").textContent = "生成画像から動画";
+      $("concept").value = "";
+      $("concept").placeholder =
+        "この画像の人物や物にさせたい動きを入力してください。例：ゆっくり振り返って手を振る。";
+      $("jobForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("concept").focus({ preventScroll: true });
+    }
+
     $("engine").addEventListener("change", () => {
       const ltx = $("engine").value === "ltx25";
       const animate = $("engine").value === "animate2";
+      const imageOnly = $("engine").value === "zimage";
       const imageToVideo = ["wan14", "ltx25", "animate2"].includes($("engine").value);
+      $("imageSizeField").style.display = imageOnly ? "block" : "none";
+      $("shotsField").style.display = imageOnly ? "none" : "block";
+      $("qualityField").style.display = imageOnly ? "none" : "block";
+      if (!continuationSource) {
+        $("submitButton").textContent = imageOnly ? "画像を生成" : "動画を生成";
+        if (imageOnly) $("formTitle").textContent = "新しい画像";
+        else if ($("formTitle").textContent === "新しい画像") {
+          $("formTitle").textContent = "新しい動画";
+        }
+      }
       $("ltxCheck").classList.toggle("show", ltx);
       $("precisionCheck").classList.toggle("show", $("engine").value === "wan14");
       if ($("engine").value !== "wan14") $("precisionMode").checked = false;
@@ -779,10 +850,12 @@
           ? Number($("seed").value)
           : Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
         $("seed").value = String(seed);
+        const imageOnly = $("engine").value === "zimage";
         const payload = {
           concept: $("concept").value.trim(),
           engine: $("engine").value,
-          shots: Number($("shots").value),
+          image_size: $("imageSize").value,
+          shots: imageOnly ? 1 : Number($("shots").value),
           seed,
           input_image: primaryImage,
           reference_front: animate ? image : null,
@@ -790,7 +863,7 @@
           reference_back: backImage,
           driving_video: drivingVideo,
           enhance_prompt: $("enhancePrompt").checked,
-          quality_mode: qualityMode,
+          quality_mode: !imageOnly && qualityMode,
           precision_mode: $("engine").value === "wan14" && $("precisionMode").checked,
           continuation_of: continuation ? continuation.id : null,
           ltx_license_acknowledged: $("ltxAck").checked
@@ -800,6 +873,9 @@
           body: JSON.stringify(payload)
         });
         if (continuation) clearContinuationMode();
+        if ($("formTitle").textContent === "生成画像から動画") {
+          $("formTitle").textContent = "新しい動画";
+        }
         watchJob(result.id);
         await loadRecent();
       } catch (error) {
@@ -812,6 +888,10 @@
 
     $("continueJobButton").addEventListener("click", () => {
       if (currentJob) startContinuation(currentJob);
+    });
+
+    $("imageToVideoButton").addEventListener("click", () => {
+      if (currentJob?.generated_input) startImageToVideo(currentJob);
     });
 
     $("clearContinuation").addEventListener("click", () => {

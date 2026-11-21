@@ -126,6 +126,25 @@ ENGINE_CONFIG: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "zimage": {
+        "workflow": PROJECT_ROOT
+        / "workflows"
+        / "image_z_image_turbo.api.json",
+        "prompt_node": "27",
+        "prompt_field": "text",
+        "image_node": None,
+        "size_node": "13",
+        "seed_node": "3",
+        "seed_field": "seed",
+        "save_node": "9",
+        "prefix": "zimage",
+    },
+}
+VIDEO_ENGINES = ("wan5b", "wan14", "ltx25", "animate2")
+IMAGE_SIZES: dict[str, tuple[int, int]] = {
+    "square": (1024, 1024),
+    "landscape": (1280, 720),
+    "portrait": (720, 1280),
 }
 
 COMFY_TERMINAL_STATUSES = {"success", "error"}
@@ -190,6 +209,7 @@ def init_db() -> None:
                 quality_mode INTEGER NOT NULL DEFAULT 0,
                 precision_mode INTEGER NOT NULL DEFAULT 0,
                 continuation_of TEXT NOT NULL DEFAULT '',
+                image_size TEXT NOT NULL DEFAULT '',
                 plan_json TEXT,
                 output_path TEXT,
                 error TEXT,
@@ -236,6 +256,13 @@ def init_db() -> None:
                 """
                 ALTER TABLE jobs
                 ADD COLUMN continuation_of TEXT NOT NULL DEFAULT ''
+                """
+            )
+        if "image_size" not in columns:
+            db.execute(
+                """
+                ALTER TABLE jobs
+                ADD COLUMN image_size TEXT NOT NULL DEFAULT ''
                 """
             )
         if "driving_video" not in columns:
@@ -969,6 +996,46 @@ def create_motion_prompt(
     return motion_prompt.strip()
 
 
+IMAGE_PROMPT_SYSTEM = (
+    "You convert a user's request into one English prompt for a local "
+    "text-to-image model. Return only the requested data.\n"
+    "prompt: one detailed paragraph describing a single still image. Keep "
+    "every requested subject, subject count, appearance, clothing, object, "
+    "setting, lighting, and art style. Never add people, animals, objects, or "
+    "text that the user did not request, and never soften or drop a "
+    "requested detail. The image will be the first frame of a video, so show "
+    "every subject fully inside the frame in a natural, stable pose before "
+    "any action happens, with clear space around them, sharp focus, and "
+    "coherent anatomy. Do not describe motion blur, cuts, or text overlays."
+)
+
+
+def create_image_prompt(concept: str) -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "required": ["title", "prompt"],
+        "properties": {
+            "title": {"type": "string"},
+            "prompt": {"type": "string"},
+        },
+    }
+    result = ollama_structured(
+        IMAGE_PROMPT_SYSTEM,
+        "Treat the following request as mandatory constraints, not "
+        f"inspiration:\n{concept}",
+        schema,
+        temperature=0.2,
+        num_predict=768,
+    )
+    prompt = result.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise RuntimeError("Ollama returned an invalid image prompt")
+    return {
+        "title": str(result.get("title") or concept[:80]).strip(),
+        "prompt": prompt.strip(),
+    }
+
+
 def free_comfy() -> None:
     request_json(
         f"{COMFY_URL}/free",
@@ -1038,7 +1105,9 @@ def wait_for_comfy(prompt_id: str, job_id: str) -> dict[str, Any]:
 
 
 def output_relative_path(
-    history: dict[str, Any], save_node: str | None = None
+    history: dict[str, Any],
+    save_node: str | None = None,
+    suffix: str = ".mp4",
 ) -> str:
     outputs = history.get("outputs")
     if not isinstance(outputs, dict):
@@ -1061,7 +1130,7 @@ def output_relative_path(
                 subfolder = item.get("subfolder", "")
                 if (
                     isinstance(filename, str)
-                    and filename.lower().endswith(".mp4")
+                    and filename.lower().endswith(suffix)
                     and isinstance(subfolder, str)
                 ):
                     relative = Path(subfolder) / filename
@@ -1069,7 +1138,9 @@ def output_relative_path(
                     if not resolved.is_relative_to(OUTPUT_ROOT.resolve()):
                         raise RuntimeError("ComfyUI returned an unsafe path")
                     return relative.as_posix()
-    raise RuntimeError("ComfyUI history contained no MP4 output")
+    raise RuntimeError(
+        f"ComfyUI history contained no {suffix.lstrip('.').upper()} output"
+    )
 
 
 def docker_group_run(command: list[str], timeout: int = 300) -> None:
@@ -1248,6 +1319,80 @@ def combine_continuation_videos(
     return extended_relative
 
 
+def generated_input_name(job_id: str) -> str:
+    return f"generated-{job_id}.png"
+
+
+def generate_image(job_id: str, row: sqlite3.Row) -> str:
+    config = ENGINE_CONFIG["zimage"]
+    if row["enhance_prompt"]:
+        add_event(job_id, "planning", f"Planning with {OLLAMA_MODEL}")
+        try:
+            plan = create_image_prompt(row["concept"])
+        finally:
+            unload_ollama()
+    else:
+        add_event(job_id, "planning", "Using the prompt exactly as entered")
+        plan = {"title": row["concept"][:80], "prompt": row["concept"]}
+    width, height = IMAGE_SIZES[row["image_size"] or "square"]
+    plan.update({"width": width, "height": height})
+    raise_if_cancelled(job_id)
+    with db_connect() as db:
+        db.execute(
+            "UPDATE jobs SET plan_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(plan, ensure_ascii=False), utc_now(), job_id),
+        )
+
+    free_comfy()
+    job_dir = OUTPUT_ROOT / "jobs" / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_dir.chmod(0o777)
+    add_event(job_id, "generating", f"Generating a {width}×{height} image")
+    workflow = json.loads(config["workflow"].read_text())
+    workflow[config["prompt_node"]]["inputs"][config["prompt_field"]] = plan[
+        "prompt"
+    ]
+    workflow[config["seed_node"]]["inputs"][config["seed_field"]] = row["seed"]
+    workflow[config["size_node"]]["inputs"].update(
+        {"width": width, "height": height}
+    )
+    workflow[config["save_node"]]["inputs"]["filename_prefix"] = (
+        f"jobs/{job_id}/image_{config['prefix']}"
+    )
+    history = wait_for_comfy(queue_comfy(workflow), job_id)
+    raw_relative = output_relative_path(
+        history, config["save_node"], suffix=".png"
+    )
+
+    raise_if_cancelled(job_id)
+    add_event(job_id, "finishing", "Removing embedded workflow metadata")
+    final_relative = f"jobs/{job_id}/image.png"
+    docker_group_run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "comfyui",
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            f"/opt/ComfyUI/output/{raw_relative}",
+            "-map_metadata",
+            "-1",
+            "-y",
+            f"/opt/ComfyUI/output/{final_relative}",
+        ],
+        timeout=120,
+    )
+    shutil.copy2(
+        OUTPUT_ROOT / final_relative, INPUT_ROOT / generated_input_name(job_id)
+    )
+    return final_relative
+
+
 def process_job(job_id: str) -> None:
     with db_connect() as db:
         row = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -1262,6 +1407,11 @@ def process_job(job_id: str) -> None:
     try:
         raise_if_cancelled(job_id)
         config = ENGINE_CONFIG[engine]
+        if engine == "zimage":
+            final_relative = generate_image(job_id, row)
+            raise_if_cancelled(job_id)
+            finish_job(job_id, "succeeded", output_path=final_relative)
+            return
         parent: sqlite3.Row | None = None
         if row["continuation_of"]:
             with db_connect() as db:
@@ -1555,7 +1705,8 @@ def worker_loop() -> None:
 
 class JobCreate(BaseModel):
     concept: str = Field(min_length=10, max_length=2000)
-    engine: Literal["wan5b", "wan14", "ltx25", "animate2"] = "wan5b"
+    engine: Literal["wan5b", "wan14", "ltx25", "animate2", "zimage"] = "wan5b"
+    image_size: Literal["square", "landscape", "portrait"] = "square"
     input_image: str | None = Field(
         default=None,
         pattern=r"^[A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp)$",
@@ -1597,6 +1748,13 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_ltx(self) -> "JobCreate":
+        if self.engine == "zimage":
+            if self.shots != 1:
+                raise ValueError("Image jobs produce exactly one image")
+            if self.continuation_of or self.precision_mode:
+                raise ValueError(
+                    "Continuation and precision mode apply to videos only"
+                )
         if self.continuation_of and self.engine not in {"wan5b", "wan14"}:
             raise ValueError(
                 "Continuation is currently available for Wan 5B and Wan 14B"
@@ -1637,6 +1795,15 @@ def row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     result["output_url"] = (
         f"/outputs/{quote(output_path, safe='/')}"
         if isinstance(output_path, str)
+        else None
+    )
+    result["output_type"] = "image" if result["engine"] == "zimage" else "video"
+    generated = generated_input_name(result["id"])
+    result["generated_input"] = (
+        generated
+        if result["engine"] == "zimage"
+        and result["status"] == "succeeded"
+        and (INPUT_ROOT / generated).is_file()
         else None
     )
     return result
@@ -1769,13 +1936,16 @@ def get_input(filename: str) -> FileResponse:
 @app.get("/outputs/{output_path:path}")
 def get_output(output_path: str) -> FileResponse:
     path = (OUTPUT_ROOT / output_path).resolve()
+    media_types = {".mp4": "video/mp4", ".png": "image/png"}
     if (
         not path.is_relative_to(OUTPUT_ROOT.resolve())
         or not path.is_file()
-        or path.suffix.lower() != ".mp4"
+        or path.suffix.lower() not in media_types
     ):
         raise HTTPException(status_code=404, detail="Output not found")
-    return FileResponse(path, media_type="video/mp4", filename=path.name)
+    return FileResponse(
+        path, media_type=media_types[path.suffix.lower()], filename=path.name
+    )
 
 
 @app.get("/health")
@@ -1797,9 +1967,11 @@ def create_job(request: JobCreate) -> dict[str, Any]:
     job_id = str(uuid.uuid4())
     now = utc_now()
     continuation_of = request.continuation_of or ""
-    input_image = request.input_image or ""
-    quality_mode = int(request.quality_mode)
+    is_image = request.engine == "zimage"
+    input_image = "" if is_image else request.input_image or ""
+    quality_mode = 0 if is_image else int(request.quality_mode)
     precision_mode = int(request.precision_mode)
+    image_size = request.image_size if is_image else ""
     queued_message = "Job accepted"
     if continuation_of:
         with db_connect() as db:
@@ -1846,9 +2018,9 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     id, status, engine, concept, input_image, reference_front,
                     reference_side, reference_back, driving_video, shots, seed,
                     enhance_prompt, quality_mode, precision_mode,
-                    continuation_of, created_at, updated_at
+                    continuation_of, image_size, created_at, updated_at
                 ) VALUES (
-                    ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -1866,6 +2038,7 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     quality_mode,
                     precision_mode,
                     continuation_of,
+                    image_size,
                     now,
                     now,
                 ),
@@ -1976,6 +2149,7 @@ def remove_job_files(job_id: str) -> None:
     for pattern in (
         f"continuation-{job_id}-*.png",
         f"motion-guide-{job_id}.mp4",
+        generated_input_name(job_id),
     ):
         for path in INPUT_ROOT.glob(pattern):
             path.unlink(missing_ok=True)
@@ -2000,8 +2174,23 @@ def delete_job(job_id: str) -> dict[str, str]:
             """,
             (job_id,),
         ).fetchone()
+        active_image_user = db.execute(
+            """
+            SELECT id FROM jobs
+            WHERE input_image = ?
+              AND status NOT IN ('succeeded', 'failed', 'cancelled')
+            LIMIT 1
+            """,
+            (generated_input_name(job_id),),
+        ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    if active_image_user is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for or cancel the video that uses this image "
+            "before deleting it",
+        )
     if row["status"] not in {"succeeded", "failed", "cancelled"}:
         raise HTTPException(
             status_code=409, detail="Cancel the job before deleting it"

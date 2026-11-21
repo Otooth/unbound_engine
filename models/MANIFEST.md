@@ -66,3 +66,20 @@ Revision: `49b093a39c19169a8a81721dcc541e07e945232f`
 | `latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` | `latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` | 995,778,752 | `eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8` |
 
 Total: 39,709,872,236 bytes.
+
+## Z-Image Turbo (BF16) — not downloaded yet
+
+Source: `Comfy-Org/z_image_turbo`  
+Revision: `6fc90a3b1b653e935a0d175e260736de25b84df5`
+
+Expected values from the Hugging Face tree API (LFS SHA256). The local files
+have not been downloaded or verified yet; `scripts/download-models.py zimage`
+checks these values after download.
+
+| Local path | Source path | Size (bytes) | SHA256 |
+|---|---|---:|---|
+| `diffusion_models/z_image_turbo_bf16.safetensors` | `split_files/diffusion_models/z_image_turbo_bf16.safetensors` | 12,309,866,400 | `2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6` |
+| `text_encoders/qwen_3_4b.safetensors` | `split_files/text_encoders/qwen_3_4b.safetensors` | 8,044,982,048 | `6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a` |
+| `vae/ae.safetensors` | `split_files/vae/ae.safetensors` | 335,304,388 | `afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38` |
+
+Total: 20,690,152,836 bytes.
