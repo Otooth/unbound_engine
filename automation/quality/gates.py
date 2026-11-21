@@ -37,14 +37,26 @@ def aggregate_reports(
     )
 
 
+RETRYABLE_GATES = frozenset({"semantic", "temporal"})
+
+
 def should_retry(report: QualityReport, retries_used: int = 0) -> bool:
-    """Retry a hard failure only when the single retry is still unused."""
+    """Retry once, and only when a new seed and prompt can fix every defect.
+
+    Technical and boundary failures are deterministic for the same inputs,
+    so regenerating them costs a full generation without changing the result.
+    """
 
     if not isinstance(report, QualityReport):
         raise ValueError("report must be a QualityReport")
     if type(retries_used) is not int or retries_used < 0:
         raise ValueError("retries_used must be a non-negative integer")
-    return report.hard_failed and retries_used == 0
+    hard_issues = [issue for issue in report.issues if issue.hard]
+    return (
+        bool(hard_issues)
+        and retries_used == 0
+        and all(issue.gate in RETRYABLE_GATES for issue in hard_issues)
+    )
 
 
 aggregate_quality_reports = aggregate_reports

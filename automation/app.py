@@ -1967,10 +1967,20 @@ def quality_corrective_prompt(report: QualityReport) -> str:
             value = audit.get("corrective_prompt")
             if isinstance(value, str) and value.strip():
                 corrections.append(value.strip())
-    if not corrections:
-        corrections.extend(
-            issue.message for issue in report.issues if issue.hard
-        )
+    generation_constraints = {
+        "temporal.frozen_video": (
+            "Keep the requested action visibly moving throughout the clip; "
+            "do not hold a still pose."
+        ),
+        "temporal.black_frames": (
+            "Keep the scene clearly lit and visible in every frame."
+        ),
+    }
+    corrections.extend(
+        generation_constraints[issue.code]
+        for issue in report.issues
+        if issue.hard and issue.code in generation_constraints
+    )
     return " ".join(dict.fromkeys(corrections))
 
 
@@ -2633,7 +2643,11 @@ def process_job(job_id: str) -> None:
                 shot_relative = output_relative_path(
                     history, config["save_node"]
                 )
-                boundary_image = continuation_image or row["input_image"] or ""
+                # A user start image is restyled by I2V models, so pixel
+                # metrics apply only to frames extracted from earlier video.
+                boundary_image = continuation_image or (
+                    row["input_image"] if parent is not None else ""
+                ) or ""
                 report = run_quality_gate(
                     job_id,
                     (index - 1) * 2 + attempt,
@@ -2703,23 +2717,26 @@ def process_job(job_id: str) -> None:
                         final_relative,
                         attempt=attempt,
                     )
-                final_report = run_quality_gate(
-                    job_id,
-                    attempt * 100 + 99,
-                    final_relative,
-                    str(row["concept"]),
-                    reference_image=row["input_image"],
-                )
-                quality_attempts.append(
-                    {
-                        "kind": "final",
-                        "segment": None,
-                        "attempt": attempt,
-                        "output": final_relative,
-                        "report": final_report.to_dict(),
-                    }
-                )
-                quality_reports.append(final_report)
+                # A single new segment is only remuxed here; re-auditing the
+                # same frames adds time and can flip a passing verdict.
+                if len(shot_paths) > 1 or parent is not None:
+                    final_report = run_quality_gate(
+                        job_id,
+                        attempt * 100 + 99,
+                        final_relative,
+                        str(row["concept"]),
+                        reference_image=row["input_image"],
+                    )
+                    quality_attempts.append(
+                        {
+                            "kind": "final",
+                            "segment": None,
+                            "attempt": attempt,
+                            "output": final_relative,
+                            "report": final_report.to_dict(),
+                        }
+                    )
+                    quality_reports.append(final_report)
                 final_quality = aggregate_reports(
                     quality_reports,
                     gate="job",

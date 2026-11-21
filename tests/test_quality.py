@@ -302,6 +302,20 @@ class AggregateAndRetryTests(unittest.TestCase):
         self.assertFalse(should_retry(aggregate, retries_used=1))
         self.assertFalse(should_retry(technical, retries_used=0))
 
+    def test_deterministic_failures_are_not_regenerated(self) -> None:
+        boundary = evaluate_boundary_metrics(0.678, 8.73)
+        semantic = evaluate_vision_audit(
+            valid_audit(instruction_followed=False, confidence=0.95)
+        )
+
+        self.assertFalse(should_retry(boundary, retries_used=0))
+        self.assertFalse(
+            should_retry(
+                aggregate_reports([semantic, boundary]),
+                retries_used=0,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

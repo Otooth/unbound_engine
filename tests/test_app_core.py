@@ -11,6 +11,31 @@ from unittest.mock import Mock, patch
 from automation import app
 
 
+class CorrectivePromptTests(unittest.TestCase):
+    def test_measurement_messages_never_enter_generation_prompt(self) -> None:
+        report = app.aggregate_reports(
+            [
+                app.evaluate_boundary_metrics(0.678, 8.73),
+                app.QualityReport(
+                    gate="temporal",
+                    issues=(
+                        app.QualityIssue(
+                            code="temporal.frozen_video",
+                            message="The video contains a frozen interval",
+                            gate="temporal",
+                        ),
+                    ),
+                ),
+            ]
+        )
+
+        prompt = app.quality_corrective_prompt(report)
+
+        self.assertNotIn("SSIM", prompt)
+        self.assertNotIn("PSNR", prompt)
+        self.assertIn("visibly moving", prompt)
+
+
 class ProfileTests(unittest.TestCase):
     @staticmethod
     def _wan14_workflow(profile: str) -> dict[str, object]:
