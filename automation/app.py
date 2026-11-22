@@ -150,6 +150,10 @@ ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "prompt_field": "text",
         "image_node": "76",
         "garment_node": "81",
+        "guider_node": "103",
+        "person_positive_node": "117",
+        "person_negative_node": "115",
+        "garment_only_nodes": ("81", "85", "119", "120", "118"),
         "seed_node": "106",
         "seed_field": "noise_seed",
         "save_node": "9",
@@ -171,6 +175,12 @@ OUTFIT_EDIT_INSTRUCTION = (
     "background from image 1 unchanged. The result must show exactly one "
     "person and must not include the mannequin, hanger, or background of "
     "image 2."
+)
+IMAGE_EDIT_KEEP = (
+    "Keep everything the instruction does not mention exactly as in the "
+    "image: the person's face, identity, hairstyle, skin tone, body shape, "
+    "pose, framing, lighting, and background. The result must show the same "
+    "number of people."
 )
 IMAGE_SIZES: dict[str, tuple[int, int]] = {
     "square": (1024, 1024),
@@ -1128,6 +1138,38 @@ def create_outfit_prompt(notes: str, enhance: bool) -> dict[str, Any]:
     return {"title": "Outfit edit", "prompt": prompt}
 
 
+IMAGE_EDIT_SYSTEM = (
+    "You turn a user's request for editing one photo into one precise English "
+    "image-edit instruction. Keep every requested change, add nothing the "
+    "user did not ask for, and do not describe parts that stay unchanged. "
+    "Return only the requested data."
+)
+
+
+def create_image_edit_prompt(request: str, enhance: bool) -> dict[str, Any]:
+    instruction = request.strip()
+    if enhance:
+        result = ollama_structured(
+            IMAGE_EDIT_SYSTEM,
+            f"User request:\n{instruction}",
+            {
+                "type": "object",
+                "required": ["instruction"],
+                "properties": {"instruction": {"type": "string"}},
+            },
+            temperature=0.2,
+            num_predict=384,
+        )
+        translated = result.get("instruction")
+        if not isinstance(translated, str) or not translated.strip():
+            raise RuntimeError("Ollama returned an invalid edit instruction")
+        instruction = translated.strip()
+    return {
+        "title": "Image edit",
+        "prompt": f"{instruction.rstrip(' .')}. {IMAGE_EDIT_KEEP}",
+    }
+
+
 def free_comfy() -> None:
     request_json(
         f"{COMFY_URL}/free",
@@ -1558,37 +1600,45 @@ def generate_image(job_id: str, row: sqlite3.Row) -> str:
     engine = row["engine"]
     config = ENGINE_CONFIG[engine]
     is_outfit = engine == "outfit"
+    has_garment = is_outfit and bool(row["garment_image"])
     if is_outfit:
         resolved_input(row["input_image"], "Person image")
-        resolved_input(row["garment_image"], "Outfit image")
+        if has_garment:
+            resolved_input(row["garment_image"], "Outfit image")
     use_ollama = bool(row["enhance_prompt"]) and (
         not is_outfit or bool(row["concept"].strip())
     )
+
+    def build_plan(enhance: bool) -> dict[str, Any]:
+        if has_garment:
+            return create_outfit_prompt(row["concept"], enhance)
+        if is_outfit:
+            return create_image_edit_prompt(row["concept"], enhance)
+        if enhance:
+            return create_image_prompt(row["concept"])
+        return {"title": row["concept"][:80], "prompt": row["concept"]}
+
     if use_ollama:
         add_event(job_id, "planning", f"Planning with {OLLAMA_MODEL}")
         try:
-            plan = (
-                create_outfit_prompt(row["concept"], True)
-                if is_outfit
-                else create_image_prompt(row["concept"])
-            )
+            plan = build_plan(True)
         finally:
             unload_ollama()
     else:
         add_event(job_id, "planning", "Using the prompt exactly as entered")
-        plan = (
-            create_outfit_prompt(row["concept"], False)
-            if is_outfit
-            else {"title": row["concept"][:80], "prompt": row["concept"]}
-        )
+        plan = build_plan(False)
     if is_outfit:
         plan.update(
             {
                 "person_image": row["input_image"],
-                "outfit_image": row["garment_image"],
+                "outfit_image": row["garment_image"] or None,
             }
         )
-        size_message = "Editing the outfit"
+        size_message = (
+            "Editing the outfit"
+            if has_garment
+            else "Editing the image with the instruction"
+        )
     else:
         width, height = IMAGE_SIZES[row["image_size"] or "square"]
         plan.update({"width": width, "height": height})
@@ -1612,9 +1662,16 @@ def generate_image(job_id: str, row: sqlite3.Row) -> str:
     workflow[config["seed_node"]]["inputs"][config["seed_field"]] = row["seed"]
     if is_outfit:
         workflow[config["image_node"]]["inputs"]["image"] = row["input_image"]
-        workflow[config["garment_node"]]["inputs"]["image"] = row[
-            "garment_image"
-        ]
+        if has_garment:
+            workflow[config["garment_node"]]["inputs"]["image"] = row[
+                "garment_image"
+            ]
+        else:
+            guider = workflow[config["guider_node"]]["inputs"]
+            guider["positive"] = [config["person_positive_node"], 0]
+            guider["negative"] = [config["person_negative_node"], 0]
+            for node_id in config["garment_only_nodes"]:
+                del workflow[node_id]
     else:
         workflow[config["size_node"]]["inputs"].update(
             {"width": plan["width"], "height": plan["height"]}
@@ -2180,11 +2237,18 @@ class JobCreate(BaseModel):
     def validate_ltx(self) -> "JobCreate":
         # An Animate 2 continuation may keep reading its source motion video;
         # create_job checks whether that video still has frames.
-        prompt_optional = self.engine == "outfit" or (
+        prompt_optional = (
+            self.engine == "outfit" and bool(self.garment_image)
+        ) or (
             self.engine == "animate2"
             and bool(self.driving_video or self.continuation_of)
         )
-        if not prompt_optional and len(self.concept.strip()) < 10:
+        if self.engine == "outfit" and not self.garment_image:
+            if len(self.concept.strip()) < 2:
+                raise ValueError(
+                    "Image editing without an outfit image needs an instruction"
+                )
+        elif not prompt_optional and len(self.concept.strip()) < 10:
             raise ValueError("concept must contain at least 10 characters")
         if self.engine in IMAGE_ENGINES:
             if self.shots != 1:
@@ -2193,12 +2257,8 @@ class JobCreate(BaseModel):
                 raise ValueError(
                     "Continuation and precision mode apply to videos only"
                 )
-        if self.engine == "outfit" and not (
-            self.input_image and self.garment_image
-        ):
-            raise ValueError(
-                "Outfit editing needs both a person image and an outfit image"
-            )
+        if self.engine == "outfit" and not self.input_image:
+            raise ValueError("Image editing needs a person image")
         if self.precision_mode and self.engine != "wan14":
             raise ValueError("precision_mode is only available for Wan 14B")
         if (
@@ -2436,7 +2496,8 @@ def create_job(request: JobCreate) -> dict[str, Any]:
     if is_outfit:
         try:
             resolved_input(input_image, "Person image")
-            resolved_input(garment_image, "Outfit image")
+            if garment_image:
+                resolved_input(garment_image, "Outfit image")
         except (ValueError, FileNotFoundError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
     queued_message = "Job accepted"

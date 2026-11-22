@@ -215,7 +215,7 @@
                 <option value="wan14">Wan 2.2 14B — 画像を動かす</option>
                 <option value="ltx25">LTX-2.5 — 画像を動かす・音声付き</option>
                 <option value="zimage">Z-Image Turbo — 文章から画像（動画の開始画像に使える）</option>
-                <option value="outfit">FLUX.2 Klein — 人物の服装を画像で差し替え（Wan Animate 2で動かせる）</option>
+                <option value="outfit">FLUX.2 Klein — 人物画像を指示文や服の画像で編集（Wan Animate 2で動かせる）</option>
               </select>
             </div>
             <div class="field" id="imageSizeField" style="display:none">
@@ -249,12 +249,12 @@
             <div class="hint" id="imageHint">画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。</div>
           </div>
           <div class="field" id="garmentField" style="display:none">
-            <label for="garmentImage">着せたい服の画像（必須）</label>
+            <label for="garmentImage">着せたい服の画像（任意）</label>
             <select id="garmentImage"></select>
             <div class="upload" style="margin-top:8px">
               <input type="file" id="garmentFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
             </div>
-            <div class="hint">服だけが写った商品画像や、服がはっきり見える写真を指定してください。顔の入れ替えには使いません。本人・同意を得た人物・AIオリジナルの人物の画像だけを使用してください。</div>
+            <div class="hint">指定すると、その服に着せ替えます。服だけが写った商品画像や、服がはっきり見える写真が適しています。指定しない場合は指示文だけで編集します。本人・同意を得た人物・AIオリジナルの人物の画像だけを使用してください。</div>
           </div>
           <div id="animateFields" style="display:none">
             <div class="row">
@@ -402,7 +402,7 @@
       (imageEngines.includes(job?.engine) && imageStatusLabels[stage]) || statusLabels[stage];
     const engineNames = {
       wan5b: "Wan 5B", wan14: "Wan 14B", ltx25: "LTX-2.5",
-      animate2: "Wan Animate 2", zimage: "Z-Image 画像", outfit: "服装変更"
+      animate2: "Wan Animate 2", zimage: "Z-Image 画像", outfit: "画像編集"
     };
     const defaultConceptPlaceholder =
       "例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。";
@@ -820,8 +820,8 @@
       updateConceptRequirement();
       if (!continuationSource) {
         $("submitButton").textContent = imageOnly ? "画像を生成" : "動画を生成";
-        if (imageOnly) $("formTitle").textContent = outfit ? "服装の差し替え" : "新しい画像";
-        else if (["新しい画像", "服装の差し替え"].includes($("formTitle").textContent)) {
+        if (imageOnly) $("formTitle").textContent = outfit ? "画像の編集" : "新しい画像";
+        else if (["新しい画像", "画像の編集"].includes($("formTitle").textContent)) {
           $("formTitle").textContent = "新しい動画";
         }
       }
@@ -838,7 +838,7 @@
       $("imageHint").textContent = animate
         ? "正面・側面・背面を登録できますが、生成に使うのは下で選ぶ1面だけです。選択面と同じ向きを保つ動作を使用してください。"
         : outfit
-          ? "顔・髪型・ポーズ・背景はこの画像を保ち、服装だけを差し替えます。Wan Animate 2で動かす場合は、頭から足先まで写った正面の全身画像が適しています。"
+          ? "指示した部分だけを変え、それ以外の顔・髪型・ポーズ・背景はこの画像を保ちます。Wan Animate 2で動かす場合は、頭から足先まで写った正面の全身画像が適しています。"
           : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
       updateShotsOptions();
       updateCharacterPreview().catch((error) => {
@@ -869,15 +869,20 @@
       const outfit = $("engine").value === "outfit";
       const trace = $("engine").value === "animate2"
         && ($("motionFile").files.length > 0 || Boolean(continuationSource));
-      const optional = outfit || trace;
+      const garment = outfit
+        && ($("garmentFile").files.length > 0 || Boolean($("garmentImage").value));
+      const optional = garment || trace;
       $("concept").required = !optional;
-      $("concept").minLength = optional ? 0 : 10;
-      $("conceptLabel").textContent = outfit
+      $("concept").minLength = optional ? 0 : outfit ? 2 : 10;
+      $("conceptLabel").textContent = garment
         ? "追加の指示（任意）"
+        : outfit ? "編集の指示（必須）"
         : trace ? "場面や雰囲気の補足（任意）" : "作りたい映像を日本語で入力";
       if (continuationSource) return;
-      if (outfit) {
+      if (garment) {
         $("concept").placeholder = "空欄で構いません。例：シャツの裾はズボンの外に出す。袖はまくらない。";
+      } else if (outfit) {
+        $("concept").placeholder = "変えたい内容を入力してください。例：髪を金髪のショートにする。服を紺のスーツにする。背景を夕方の海辺にする。";
       } else if (trace) {
         $("concept").placeholder = "空欄なら動作元動画の動きをそのままなぞります。例：楽しそうな表情で踊る。";
       } else if ($("engine").value === "animate2") {
@@ -886,6 +891,9 @@
         $("concept").placeholder = defaultConceptPlaceholder;
       }
     }
+
+    $("garmentImage").addEventListener("change", updateConceptRequirement);
+    $("garmentFile").addEventListener("change", updateConceptRequirement);
 
     let motionPreviewUrl = null;
 
@@ -997,13 +1005,10 @@
           throw new Error(animate
             ? "キャラクター三面図を選択してください。"
             : outfit
-              ? "服装を差し替える人物画像を選択してください。"
+              ? "編集する人物画像を選択してください。"
               : "画像を動かすモデルでは開始画像を選択してください。");
         }
         const garmentImage = outfit ? await uploadGarmentImage() : null;
-        if (outfit && !garmentImage) {
-          throw new Error("着せたい服の画像を選択してください。");
-        }
         const newAnimate = animate && !continuation;
         const sideImage = newAnimate
           ? await uploadAdditionalReference("sideImage", "sideFile")

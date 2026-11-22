@@ -185,6 +185,23 @@ Via the API:
  "garment_image": "cardigan.png", "concept": ""}
 ```
 
+The outfit image is optional. Without it, the same FLUX.2 Klein model edits
+the person image from the instruction alone (hair, clothing, background, and
+so on). The instruction is then required. In the workflow, the second
+reference-image nodes are removed and the guider uses the person reference
+only. Everything the instruction does not mention is kept from the image.
+
+```json
+{"engine": "outfit", "input_image": "person.png",
+ "concept": "髪を金髪のショートヘアにして、背景を夕方の海辺に変える",
+ "enhance_prompt": true}
+```
+
+Instruction text is passed through as entered. With AI conversion on, Qwen
+only translates the request and does not reject it. Measured: 19 s with AI
+conversion (8 s Qwen, about 59GB peak while Qwen is loaded), 9 s without
+(29.7GB peak).
+
 Measured on this DGX Spark: replacing a navy T-shirt with a red cardigan on a
 576×1024 full-body image took 12 seconds end to end (10 s editing) with
 27.5 GB peak system memory; face, hair, trousers, shoes, pose, and background
