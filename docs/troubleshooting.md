@@ -203,8 +203,12 @@ image. The prompt planner also keeps subject, setting, lighting, and camera
 position continuous.
 
 This removes the hard visual reset, but long generative video can still drift
-gradually in identity or fine detail. LTX-2.5 and Wan Animate 2 remain
-single-segment modes in the current fixed workflows.
+gradually in identity or fine detail. LTX-2.5 remains a single-segment mode.
+Wan Animate 2 can use up to six segments only when tracing a motion MP4; each
+segment continues the motion position and final frame of the previous one.
+If fewer segments are produced than requested, the job events show
+`The motion video is shorter than requested`; pick an earlier start position
+or a longer MP4.
 
 ## A completed video needs more footage
 
@@ -262,7 +266,8 @@ very narrow source from being center-cropped down to its face.
 
 Wan Animate 2 also needs motion. Upload a short MP4 to reproduce its movement,
 or leave the motion field empty to let Wan 5B generate a motion guide from the
-text first. Only the first 81 frames are used by the current fixed workflow.
+text first. Each segment uses 81 frames; choose a longer duration to trace
+more of an uploaded MP4.
 Complex hand contact can still deform because the reference preserves
 appearance, not exact 3D geometry.
 

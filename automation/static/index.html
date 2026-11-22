@@ -233,8 +233,11 @@
                 <option value="1">約5秒</option>
                 <option value="2">約10秒（連続生成）</option>
                 <option value="3">約15秒（連続生成）</option>
+                <option value="4" hidden>約13秒</option>
+                <option value="5" hidden>約17秒</option>
+                <option value="6" hidden>約20秒</option>
               </select>
-              <div class="hint">10秒・15秒では、前区間の最終フレームを次区間へ引き継ぎます。</div>
+              <div class="hint" id="shotsHint">10秒・15秒では、前区間の最終フレームを次区間へ引き継ぎます。</div>
             </div>
           </div>
           <div class="field" id="imageField" style="display:none">
@@ -756,7 +759,10 @@
         $("concept").placeholder =
           "元動画の直後に起こる新しい動作だけを入力してください。以前の動作は書き直さないでください。";
       }
-      $("shots").value = String(Math.max(1, Math.min(3, Number(job.shots) || 1)));
+      if (!$("shots").disabled) {
+        const limit = job.engine === "animate2" ? 6 : 3;
+        $("shots").value = String(Math.max(1, Math.min(limit, Number(job.shots) || 1)));
+      }
       setQualityMode(Boolean(job.quality_mode));
       $("precisionMode").checked = Boolean(job.precision_mode);
       $("submitButton").textContent = "続きの動画を生成";
@@ -834,9 +840,7 @@
         : outfit
           ? "顔・髪型・ポーズ・背景はこの画像を保ち、服装だけを差し替えます。Wan Animate 2で動かす場合は、頭から足先まで写った正面の全身画像が適しています。"
           : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
-      $("shots").options[0].textContent = animate ? "約3秒" : "約5秒";
-      $("shots").disabled = ltx || animate;
-      if (ltx || animate) $("shots").value = "1";
+      updateShotsOptions();
       updateCharacterPreview().catch((error) => {
         $("error").textContent = error.message;
       });
@@ -885,15 +889,45 @@
 
     let motionPreviewUrl = null;
 
+    const animateFrames = (segments) => 81 + 80 * (segments - 1);
+
+    function updateShotsOptions() {
+      const animate = $("engine").value === "animate2";
+      const ltx = $("engine").value === "ltx25";
+      const motion = animate
+        && ($("motionFile").files.length > 0 || Boolean(continuationSource));
+      const selected = Number($("shots").value) || 1;
+      Array.from($("shots").options).forEach((option) => {
+        const segments = Number(option.value);
+        option.hidden = !animate && segments > 3;
+        option.textContent = animate
+          ? `約${Math.round(animateFrames(segments) / 24)}秒`
+            + (segments > 1 ? "（動作元を続けてなぞる）" : "")
+          : `約${segments * 5}秒` + (segments > 1 ? "（連続生成）" : "");
+      });
+      $("shots").disabled = ltx || (animate && !motion);
+      const limit = $("shots").disabled ? 1 : animate ? 6 : 3;
+      $("shots").value = String(Math.min(selected, limit));
+      $("shotsHint").textContent = animate
+        ? "Wan Animate 2では、動作元MP4を指定したときだけ長くできます。前区間の最終フレームと動作元の位置を次区間へ引き継ぎます（1区間あたり約6分）。動作元が足りない分は自動で短くします。"
+        : "10秒・15秒では、前区間の最終フレームを次区間へ引き継ぎます。";
+      updateMotionRangeHint();
+    }
+
     function updateMotionRangeHint() {
       const preview = $("motionPreview");
       const start = Math.max(0, Number($("motionStart").value) || 0);
       const duration = Number.isFinite(preview.duration) ? preview.duration : 0;
-      const end24 = start + 81 / 24;
+      const frames = animateFrames(Number($("shots").value) || 1);
+      const end24 = start + frames / 24;
       $("motionRangeHint").textContent = duration && start >= duration
         ? `動画の長さ（${duration.toFixed(1)}秒）より前の位置を指定してください。`
-        : `${start.toFixed(1)}秒から81フレーム分を使います（24fpsの動画なら${start.toFixed(1)}〜${end24.toFixed(1)}秒、30fpsなら約2.7秒間）。`
-          + (duration && end24 > duration ? " 残りが短い場合は生成前にエラーになります。" : "");
+        : `${start.toFixed(1)}秒から${frames}フレーム分を使います（24fpsの動画なら${start.toFixed(1)}〜${end24.toFixed(1)}秒、30fpsなら約${(frames / 30).toFixed(1)}秒間）。`
+          + (duration && start + 81 / 24 > duration
+            ? " 81フレームに満たない場合は生成前にエラーになります。"
+            : duration && end24 > duration
+              ? " 動作元が足りないため、なぞれる長さまでに自動で短くします。"
+              : "");
     }
 
     $("motionFile").addEventListener("change", () => {
@@ -903,9 +937,10 @@
       $("motionPreview").src = motionPreviewUrl || "";
       $("motionStart").value = "0";
       $("motionTrimField").style.display = file ? "block" : "none";
-      updateMotionRangeHint();
+      updateShotsOptions();
       updateConceptRequirement();
     });
+    $("shots").addEventListener("change", updateMotionRangeHint);
     $("motionPreview").addEventListener("loadedmetadata", () => {
       $("motionStart").max = String(Math.max(0, $("motionPreview").duration - 0.1));
       updateMotionRangeHint();

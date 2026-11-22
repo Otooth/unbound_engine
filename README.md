@@ -166,6 +166,17 @@ person image, scaled to about 1 megapixel.
    API. The job re-encodes the MP4 from that position into
    `input/motion-trim-JOB_ID.mp4` (removed with the job) and fails before
    generation if fewer than 81 frames remain.
+4. To trace a longer part of the motion MP4, choose a longer **動画の長さ**
+   (about 7, 10, 13, 17, or 20 s; API `"shots": 2`–`6`). Each extra segment
+   receives the previous segment's final frame through `continue_motion` and
+   continues 80 frames further into the motion MP4, so the result is
+   81 + 80 × (segments − 1) frames. If the MP4 runs out, the segment count is
+   reduced automatically (a final segment with under 24 new frames is
+   skipped). Longer output requires a motion MP4; the text-generated motion
+   guide stays at 81 frames. Measured: a 248-frame (10.3 s) motion MP4
+   requested at 20 s became 3 segments, 241 frames (10.0 s, 24 fps) in
+   986 s with a 54.8 GB peak; poses matched the source across both
+   boundaries. For more, use **この動画の続きを作る** on the result.
 
 Via the API:
 

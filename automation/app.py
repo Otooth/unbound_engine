@@ -160,6 +160,9 @@ VIDEO_ENGINES = ("wan5b", "wan14", "ltx25", "animate2")
 IMAGE_ENGINES = ("zimage", "outfit")
 # WanAnimate2ToVideo "length" in the Animate 2 workflow.
 ANIMATE_FRAMES = 81
+ANIMATE_MAX_SEGMENTS = 6
+# A segment with less new motion than this would mostly hold the last pose.
+ANIMATE_MIN_TAIL_FRAMES = 24
 OUTFIT_EDIT_INSTRUCTION = (
     "Dress the person in image 1 in the outfit shown in image 2. Replace "
     "only their clothing with the garments from image 2, reproducing the "
@@ -1723,9 +1726,14 @@ def process_job(job_id: str) -> None:
                         "The source video's motion video has no frames left. "
                         "Attach a new motion MP4 or describe the next motion."
                     )
+        has_motion_video = bool(row["driving_video"] or motion_source)
+        if engine == "animate2" and row["shots"] > 1 and not has_motion_video:
+            raise RuntimeError(
+                "Longer Wan Animate 2 videos need a motion MP4 to trace"
+            )
         trace_only = (
             engine == "animate2"
-            and bool(row["driving_video"] or motion_source)
+            and has_motion_video
             and not row["concept"].strip()
         )
         if trace_only:
@@ -1746,7 +1754,10 @@ def process_job(job_id: str) -> None:
                 plan = {
                     "title": "Motion trace",
                     "steps": [ANIMATE_TRACE_STEP],
-                    "shots": [{"prompt": ANIMATE_TRACE_PROMPT, "steps": [1]}],
+                    "shots": [
+                        {"prompt": ANIMATE_TRACE_PROMPT, "steps": [1]}
+                        for _ in range(row["shots"])
+                    ],
                 }
             elif row["enhance_prompt"]:
                 plan = create_plan(
@@ -1879,14 +1890,30 @@ def process_job(job_id: str) -> None:
             )
             free_comfy()
         if engine == "animate2":
+            first_end = (
+                max(0, motion_offset - (1 if continue_frame else 0))
+                + ANIMATE_FRAMES
+            )
+            if len(plan["shots"]) > 1:
+                remaining = input_video_frames(driving_video) - first_end
+                step = ANIMATE_FRAMES - 1
+                available = 1 + max(
+                    0, (remaining + step - ANIMATE_MIN_TAIL_FRAMES) // step
+                )
+                if len(plan["shots"]) > available:
+                    plan["shots"] = plan["shots"][:available]
+                    add_event(
+                        job_id,
+                        "motion",
+                        "The motion video is shorter than requested; "
+                        f"generating {available} segment(s)",
+                    )
             plan.update(
                 {
                     "motion_kind": motion_kind,
                     "motion_source": driving_video,
-                    "motion_offset_end": max(
-                        0, motion_offset - (1 if continue_frame else 0)
-                    )
-                    + ANIMATE_FRAMES,
+                    "motion_offset_end": first_end
+                    + (ANIMATE_FRAMES - 1) * (len(plan["shots"]) - 1),
                 }
             )
             with db_connect() as db:
@@ -1997,6 +2024,20 @@ def process_job(job_id: str) -> None:
                 history, config["save_node"]
             )
             shot_paths.append(shot_relative)
+            if index < len(plan["shots"]) and engine == "animate2":
+                add_event(
+                    job_id,
+                    "continuing",
+                    f"Passing segment {index} end frame and motion position "
+                    f"to segment {index + 1}",
+                )
+                motion_offset = (
+                    max(0, motion_offset - (1 if continue_frame else 0))
+                    + ANIMATE_FRAMES
+                )
+                continue_frame = extract_continuation_frame(
+                    job_id, index, shot_relative
+                )
             if index < len(plan["shots"]) and engine in {"wan5b", "wan14"}:
                 add_event(
                     job_id,
@@ -2098,7 +2139,7 @@ class JobCreate(BaseModel):
         pattern=r"^[A-Za-z0-9_.-]+\.mp4$",
     )
     motion_start: float = Field(default=0, ge=0, le=3600)
-    shots: int = Field(default=1, ge=1, le=3)
+    shots: int = Field(default=1, ge=1, le=ANIMATE_MAX_SEGMENTS)
     seed: int = Field(
         default_factory=lambda: int.from_bytes(os.urandom(8), "big")
         & (2**63 - 1),
@@ -2168,8 +2209,15 @@ class JobCreate(BaseModel):
             raise ValueError(
                 "An input image is required for image-based video engines"
             )
-        if self.engine == "animate2" and self.shots != 1:
-            raise ValueError("Wan Animate 2 jobs are limited to one shot")
+        if self.engine == "animate2":
+            if self.shots > 1 and not (
+                self.driving_video or self.continuation_of
+            ):
+                raise ValueError(
+                    "Longer Wan Animate 2 videos need a motion MP4 to trace"
+                )
+        elif self.shots > 3:
+            raise ValueError("Video jobs are limited to three segments")
         if self.motion_start and not (
             self.engine == "animate2" and self.driving_video
         ):
