@@ -153,7 +153,10 @@ person image, scaled to about 1 megapixel.
    (`output/jobs/JOB_ID/image.png`, metadata removed, and
    `input/generated-JOB_ID.png`).
 2. Choose **この画像を動作元動画どおりに動かす（Wan Animate 2）**, attach the
-   motion MP4, describe the scene, and generate. Wan Animate 2 animates the
+   motion MP4, and generate. The prompt is optional when a motion MP4 is
+   attached: left empty, Qwen planning is skipped and a fixed prompt asks the
+   model to follow the video's movements while keeping the reference image's
+   appearance and background. Wan Animate 2 animates the
    whole edited image; the background comes from that image, not from the
    motion video. Partial replacement inside the original video is not
    supported.

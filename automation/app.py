@@ -988,6 +988,19 @@ ANIMATE_VIEW_PROMPTS = {
 }
 
 
+ANIMATE_TRACE_STEP = "Follow the motion video exactly"
+ANIMATE_TRACE_PROMPT = (
+    "The character from the reference image performs exactly the body, hand, "
+    "and head movements of the motion video, with natural weight and timing. "
+    "Keep the character's face, hairstyle, outfit, colors, proportions, and "
+    "the background of the reference image unchanged"
+)
+ANIMATE_TRACE_POSE_PROMPT = (
+    "One adult human performer repeats the movements of the motion video, "
+    "centered and visible from head to toe, static wide camera"
+)
+
+
 def selected_reference_view(row: sqlite3.Row) -> str:
     input_image = row["input_image"]
     for view, column in (
@@ -1633,12 +1646,17 @@ def process_job(job_id: str) -> None:
             ):
                 raise FileNotFoundError("Driving video does not exist")
 
-        planning_message = (
-            f"Planning with {OLLAMA_MODEL}"
-            if row["enhance_prompt"]
-            or engine == "animate2"
-            else "Using the prompt exactly as entered"
+        trace_only = (
+            engine == "animate2"
+            and bool(row["driving_video"])
+            and not row["concept"].strip()
         )
+        if trace_only:
+            planning_message = "Tracing the motion video without a prompt"
+        elif row["enhance_prompt"] or engine == "animate2":
+            planning_message = f"Planning with {OLLAMA_MODEL}"
+        else:
+            planning_message = "Using the prompt exactly as entered"
         add_event(job_id, "planning", planning_message)
         try:
             continuation_state = (
@@ -1647,7 +1665,13 @@ def process_job(job_id: str) -> None:
             has_start_image = (
                 config["image_node"] is not None or parent is not None
             )
-            if row["enhance_prompt"]:
+            if trace_only:
+                plan = {
+                    "title": "Motion trace",
+                    "steps": [ANIMATE_TRACE_STEP],
+                    "shots": [{"prompt": ANIMATE_TRACE_PROMPT, "steps": [1]}],
+                }
+            elif row["enhance_prompt"]:
                 plan = create_plan(
                     row["concept"],
                     row["shots"],
@@ -1700,8 +1724,12 @@ def process_job(job_id: str) -> None:
                         shot["prompt"].rstrip(" .") + "." + full_body_constraint
                     )
                 plan["reference_view"] = reference_view
-                plan["motion_prompt"] = create_motion_prompt(
-                    row["concept"], plan["steps"], reference_view
+                plan["motion_prompt"] = (
+                    ANIMATE_TRACE_POSE_PROMPT
+                    if trace_only
+                    else create_motion_prompt(
+                        row["concept"], plan["steps"], reference_view
+                    )
                 )
         finally:
             unload_ollama()
@@ -1952,7 +1980,10 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_ltx(self) -> "JobCreate":
-        if self.engine != "outfit" and len(self.concept.strip()) < 10:
+        prompt_optional = self.engine == "outfit" or (
+            self.engine == "animate2" and bool(self.driving_video)
+        )
+        if not prompt_optional and len(self.concept.strip()) < 10:
             raise ValueError("concept must contain at least 10 characters")
         if self.engine in IMAGE_ENGINES:
             if self.shots != 1:

@@ -679,7 +679,7 @@
               ? `<button class="delete-job" type="button" data-delete="${job.id}" title="履歴と生成物を削除">削除</button>`
               : ""}
           </div>
-          <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60) || (job.engine === "outfit" ? "服装を差し替えた画像" : ""))}</div>
+          <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60) || ({ outfit: "服装を差し替えた画像", animate2: "動作元動画をそのままトレース" }[job.engine] || ""))}</div>
           <div class="meta">${escapeHtml(engineNames[job.engine] || job.engine)}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 画質優先" : ""}${job.precision_mode ? " · 精度優先" : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
         </div>`).join("") || '<div class="hint">まだ履歴はありません。</div>';
       document.querySelectorAll("[data-job]").forEach((card) => {
@@ -781,9 +781,9 @@
       });
       $("formTitle").textContent = "生成画像から動画";
       $("concept").value = "";
-      $("concept").placeholder = engine === "animate2"
-        ? "動作元動画（下でMP4を指定）の動きと場面を入力してください。例：明るい公園で、ゆっくり歩いてから手を振る。"
-        : "この画像の人物や物にさせたい動きを入力してください。例：ゆっくり振り返って手を振る。";
+      if (engine === "animate2") updateConceptRequirement();
+      else $("concept").placeholder =
+        "この画像の人物や物にさせたい動きを入力してください。例：ゆっくり振り返って手を振る。";
       $("jobForm").scrollIntoView({ behavior: "smooth", block: "start" });
       $("concept").focus({ preventScroll: true });
     }
@@ -798,16 +798,7 @@
       $("garmentField").style.display = outfit ? "block" : "none";
       $("shotsField").style.display = imageOnly ? "none" : "block";
       $("qualityField").style.display = imageOnly ? "none" : "block";
-      $("concept").required = !outfit;
-      $("concept").minLength = outfit ? 0 : 10;
-      $("conceptLabel").textContent = outfit
-        ? "追加の指示（任意）"
-        : "作りたい映像を日本語で入力";
-      if (!continuationSource && $("formTitle").textContent !== "生成画像から動画") {
-        $("concept").placeholder = outfit
-          ? "空欄で構いません。例：シャツの裾はズボンの外に出す。袖はまくらない。"
-          : defaultConceptPlaceholder;
-      }
+      updateConceptRequirement();
       if (!continuationSource) {
         $("submitButton").textContent = imageOnly ? "画像を生成" : "動画を生成";
         if (imageOnly) $("formTitle").textContent = outfit ? "服装の差し替え" : "新しい画像";
@@ -856,6 +847,27 @@
         $("error").textContent = error.message;
       });
     });
+    function updateConceptRequirement() {
+      const outfit = $("engine").value === "outfit";
+      const trace = $("engine").value === "animate2" && $("motionFile").files.length > 0;
+      const optional = outfit || trace;
+      $("concept").required = !optional;
+      $("concept").minLength = optional ? 0 : 10;
+      $("conceptLabel").textContent = outfit
+        ? "追加の指示（任意）"
+        : trace ? "場面や雰囲気の補足（任意）" : "作りたい映像を日本語で入力";
+      if (continuationSource) return;
+      if (outfit) {
+        $("concept").placeholder = "空欄で構いません。例：シャツの裾はズボンの外に出す。袖はまくらない。";
+      } else if (trace) {
+        $("concept").placeholder = "空欄なら動作元動画の動きをそのままなぞります。例：楽しそうな表情で踊る。";
+      } else if ($("engine").value === "animate2") {
+        $("concept").placeholder = "動作元動画を指定しない場合は、させたい動きを入力してください（文章から動作の下書きを作ります）。例：ゆっくり歩いてから手を振る。";
+      } else if ($("formTitle").textContent !== "生成画像から動画") {
+        $("concept").placeholder = defaultConceptPlaceholder;
+      }
+    }
+
     let motionPreviewUrl = null;
 
     function updateMotionRangeHint() {
@@ -877,6 +889,7 @@
       $("motionStart").value = "0";
       $("motionTrimField").style.display = file ? "block" : "none";
       updateMotionRangeHint();
+      updateConceptRequirement();
     });
     $("motionPreview").addEventListener("loadedmetadata", () => {
       $("motionStart").max = String(Math.max(0, $("motionPreview").duration - 0.1));
