@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download pinned Wan 2.2, LTX-2.5, and Z-Image model profiles and verify them."""
+"""Download pinned Wan 2.2, LTX-2.5, Z-Image, and FLUX.2 Klein model profiles and verify them."""
 
 from __future__ import annotations
 
@@ -27,6 +27,12 @@ ANIMATE_REPO = "Comfy-Org/Wan-Animate-2"
 ANIMATE_REVISION = "e7181fe1896b7f2ce34120d1a3663413548240d7"
 ZIMAGE_REPO = "Comfy-Org/z_image_turbo"
 ZIMAGE_REVISION = "6fc90a3b1b653e935a0d175e260736de25b84df5"
+KLEIN_REPO = "black-forest-labs/FLUX.2-klein-4b-fp8"
+KLEIN_REVISION = "5b4408e59397a4a37ccb46afe426d8ed86379441"
+# Only the autoencoder in this repack is Apache-2.0; FLUX.2 [dev] weights in the
+# same repository are non-commercial and are never downloaded here.
+FLUX2_VAE_REPO = "Comfy-Org/flux2-dev"
+FLUX2_VAE_REVISION = "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"
 
 PROFILES = {
     "wan5b": (
@@ -189,6 +195,32 @@ PROFILES = {
             "vae/ae.safetensors",
             335_304_388,
             "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+        ),
+    ),
+    "klein": (
+        (
+            KLEIN_REPO,
+            KLEIN_REVISION,
+            "flux-2-klein-4b-fp8.safetensors",
+            "diffusion_models/flux-2-klein-4b-fp8.safetensors",
+            4_070_624_520,
+            "97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6",
+        ),
+        (
+            ZIMAGE_REPO,
+            ZIMAGE_REVISION,
+            "split_files/text_encoders/qwen_3_4b.safetensors",
+            "text_encoders/qwen_3_4b.safetensors",
+            8_044_982_048,
+            "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+        ),
+        (
+            FLUX2_VAE_REPO,
+            FLUX2_VAE_REVISION,
+            "split_files/vae/flux2-vae.safetensors",
+            "vae/flux2-vae.safetensors",
+            336_213_556,
+            "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5",
         ),
     ),
 }

@@ -139,8 +139,31 @@ ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "save_node": "9",
         "prefix": "zimage",
     },
+    "outfit": {
+        "workflow": PROJECT_ROOT
+        / "workflows"
+        / "image_flux2_klein_outfit_edit.api.json",
+        "prompt_node": "109",
+        "prompt_field": "text",
+        "image_node": "76",
+        "garment_node": "81",
+        "seed_node": "106",
+        "seed_field": "noise_seed",
+        "save_node": "9",
+        "prefix": "outfit",
+    },
 }
 VIDEO_ENGINES = ("wan5b", "wan14", "ltx25", "animate2")
+IMAGE_ENGINES = ("zimage", "outfit")
+OUTFIT_EDIT_INSTRUCTION = (
+    "Dress the person in image 1 in the outfit shown in image 2. Replace "
+    "only their clothing with the garments from image 2, reproducing the "
+    "garments' colors, fabric, patterns, and fit. Keep the person's face, "
+    "hairstyle, skin tone, body shape, pose, framing, lighting, and the "
+    "background from image 1 unchanged. The result must show exactly one "
+    "person and must not include the mannequin, hanger, or background of "
+    "image 2."
+)
 IMAGE_SIZES: dict[str, tuple[int, int]] = {
     "square": (1024, 1024),
     "landscape": (1280, 720),
@@ -210,6 +233,7 @@ def init_db() -> None:
                 precision_mode INTEGER NOT NULL DEFAULT 0,
                 continuation_of TEXT NOT NULL DEFAULT '',
                 image_size TEXT NOT NULL DEFAULT '',
+                garment_image TEXT NOT NULL DEFAULT '',
                 plan_json TEXT,
                 output_path TEXT,
                 error TEXT,
@@ -263,6 +287,13 @@ def init_db() -> None:
                 """
                 ALTER TABLE jobs
                 ADD COLUMN image_size TEXT NOT NULL DEFAULT ''
+                """
+            )
+        if "garment_image" not in columns:
+            db.execute(
+                """
+                ALTER TABLE jobs
+                ADD COLUMN garment_image TEXT NOT NULL DEFAULT ''
                 """
             )
         if "driving_video" not in columns:
@@ -1036,6 +1067,38 @@ def create_image_prompt(concept: str) -> dict[str, Any]:
     }
 
 
+OUTFIT_NOTE_SYSTEM = (
+    "You translate a user's note about an outfit-swap image edit into one "
+    "short English instruction. Image 1 is the person and image 2 is the "
+    "outfit. Keep every requested detail, add nothing the user did not ask "
+    "for, and return only the requested data."
+)
+
+
+def create_outfit_prompt(notes: str, enhance: bool) -> dict[str, Any]:
+    notes = notes.strip()
+    if notes and enhance:
+        result = ollama_structured(
+            OUTFIT_NOTE_SYSTEM,
+            f"User note:\n{notes}",
+            {
+                "type": "object",
+                "required": ["instruction"],
+                "properties": {"instruction": {"type": "string"}},
+            },
+            temperature=0.2,
+            num_predict=384,
+        )
+        translated = result.get("instruction")
+        if not isinstance(translated, str) or not translated.strip():
+            raise RuntimeError("Ollama returned an invalid outfit note")
+        notes = translated.strip()
+    prompt = OUTFIT_EDIT_INSTRUCTION
+    if notes:
+        prompt = f"{prompt} Additional request: {notes}"
+    return {"title": "Outfit edit", "prompt": prompt}
+
+
 def free_comfy() -> None:
     request_json(
         f"{COMFY_URL}/free",
@@ -1323,19 +1386,54 @@ def generated_input_name(job_id: str) -> str:
     return f"generated-{job_id}.png"
 
 
+def resolved_input(filename: str, label: str) -> Path:
+    path = (INPUT_ROOT / filename).resolve()
+    if not path.is_relative_to(INPUT_ROOT.resolve()):
+        raise ValueError(f"{label} escaped the input directory")
+    if not filename or not path.is_file():
+        raise FileNotFoundError(f"{label} does not exist: {filename}")
+    return path
+
+
 def generate_image(job_id: str, row: sqlite3.Row) -> str:
-    config = ENGINE_CONFIG["zimage"]
-    if row["enhance_prompt"]:
+    engine = row["engine"]
+    config = ENGINE_CONFIG[engine]
+    is_outfit = engine == "outfit"
+    if is_outfit:
+        resolved_input(row["input_image"], "Person image")
+        resolved_input(row["garment_image"], "Outfit image")
+    use_ollama = bool(row["enhance_prompt"]) and (
+        not is_outfit or bool(row["concept"].strip())
+    )
+    if use_ollama:
         add_event(job_id, "planning", f"Planning with {OLLAMA_MODEL}")
         try:
-            plan = create_image_prompt(row["concept"])
+            plan = (
+                create_outfit_prompt(row["concept"], True)
+                if is_outfit
+                else create_image_prompt(row["concept"])
+            )
         finally:
             unload_ollama()
     else:
         add_event(job_id, "planning", "Using the prompt exactly as entered")
-        plan = {"title": row["concept"][:80], "prompt": row["concept"]}
-    width, height = IMAGE_SIZES[row["image_size"] or "square"]
-    plan.update({"width": width, "height": height})
+        plan = (
+            create_outfit_prompt(row["concept"], False)
+            if is_outfit
+            else {"title": row["concept"][:80], "prompt": row["concept"]}
+        )
+    if is_outfit:
+        plan.update(
+            {
+                "person_image": row["input_image"],
+                "outfit_image": row["garment_image"],
+            }
+        )
+        size_message = "Editing the outfit"
+    else:
+        width, height = IMAGE_SIZES[row["image_size"] or "square"]
+        plan.update({"width": width, "height": height})
+        size_message = f"Generating a {width}×{height} image"
     raise_if_cancelled(job_id)
     with db_connect() as db:
         db.execute(
@@ -1347,15 +1445,21 @@ def generate_image(job_id: str, row: sqlite3.Row) -> str:
     job_dir = OUTPUT_ROOT / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_dir.chmod(0o777)
-    add_event(job_id, "generating", f"Generating a {width}×{height} image")
+    add_event(job_id, "generating", size_message)
     workflow = json.loads(config["workflow"].read_text())
     workflow[config["prompt_node"]]["inputs"][config["prompt_field"]] = plan[
         "prompt"
     ]
     workflow[config["seed_node"]]["inputs"][config["seed_field"]] = row["seed"]
-    workflow[config["size_node"]]["inputs"].update(
-        {"width": width, "height": height}
-    )
+    if is_outfit:
+        workflow[config["image_node"]]["inputs"]["image"] = row["input_image"]
+        workflow[config["garment_node"]]["inputs"]["image"] = row[
+            "garment_image"
+        ]
+    else:
+        workflow[config["size_node"]]["inputs"].update(
+            {"width": plan["width"], "height": plan["height"]}
+        )
     workflow[config["save_node"]]["inputs"]["filename_prefix"] = (
         f"jobs/{job_id}/image_{config['prefix']}"
     )
@@ -1407,7 +1511,7 @@ def process_job(job_id: str) -> None:
     try:
         raise_if_cancelled(job_id)
         config = ENGINE_CONFIG[engine]
-        if engine == "zimage":
+        if engine in IMAGE_ENGINES:
             final_relative = generate_image(job_id, row)
             raise_if_cancelled(job_id)
             finish_job(job_id, "succeeded", output_path=final_relative)
@@ -1704,10 +1808,16 @@ def worker_loop() -> None:
 
 
 class JobCreate(BaseModel):
-    concept: str = Field(min_length=10, max_length=2000)
-    engine: Literal["wan5b", "wan14", "ltx25", "animate2", "zimage"] = "wan5b"
+    concept: str = Field(default="", max_length=2000)
+    engine: Literal[
+        "wan5b", "wan14", "ltx25", "animate2", "zimage", "outfit"
+    ] = "wan5b"
     image_size: Literal["square", "landscape", "portrait"] = "square"
     input_image: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp)$",
+    )
+    garment_image: str | None = Field(
         default=None,
         pattern=r"^[A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp)$",
     )
@@ -1748,13 +1858,21 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_ltx(self) -> "JobCreate":
-        if self.engine == "zimage":
+        if self.engine != "outfit" and len(self.concept.strip()) < 10:
+            raise ValueError("concept must contain at least 10 characters")
+        if self.engine in IMAGE_ENGINES:
             if self.shots != 1:
                 raise ValueError("Image jobs produce exactly one image")
             if self.continuation_of or self.precision_mode:
                 raise ValueError(
                     "Continuation and precision mode apply to videos only"
                 )
+        if self.engine == "outfit" and not (
+            self.input_image and self.garment_image
+        ):
+            raise ValueError(
+                "Outfit editing needs both a person image and an outfit image"
+            )
         if self.continuation_of and self.engine not in {"wan5b", "wan14"}:
             raise ValueError(
                 "Continuation is currently available for Wan 5B and Wan 14B"
@@ -1797,11 +1915,12 @@ def row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         if isinstance(output_path, str)
         else None
     )
-    result["output_type"] = "image" if result["engine"] == "zimage" else "video"
+    is_image = result["engine"] in IMAGE_ENGINES
+    result["output_type"] = "image" if is_image else "video"
     generated = generated_input_name(result["id"])
     result["generated_input"] = (
         generated
-        if result["engine"] == "zimage"
+        if is_image
         and result["status"] == "succeeded"
         and (INPUT_ROOT / generated).is_file()
         else None
@@ -1967,11 +2086,21 @@ def create_job(request: JobCreate) -> dict[str, Any]:
     job_id = str(uuid.uuid4())
     now = utc_now()
     continuation_of = request.continuation_of or ""
-    is_image = request.engine == "zimage"
-    input_image = "" if is_image else request.input_image or ""
+    is_image = request.engine in IMAGE_ENGINES
+    is_outfit = request.engine == "outfit"
+    input_image = (
+        "" if request.engine == "zimage" else request.input_image or ""
+    )
+    garment_image = (request.garment_image or "") if is_outfit else ""
     quality_mode = 0 if is_image else int(request.quality_mode)
     precision_mode = int(request.precision_mode)
-    image_size = request.image_size if is_image else ""
+    image_size = request.image_size if request.engine == "zimage" else ""
+    if is_outfit:
+        try:
+            resolved_input(input_image, "Person image")
+            resolved_input(garment_image, "Outfit image")
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
     queued_message = "Job accepted"
     if continuation_of:
         with db_connect() as db:
@@ -2018,9 +2147,11 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     id, status, engine, concept, input_image, reference_front,
                     reference_side, reference_back, driving_video, shots, seed,
                     enhance_prompt, quality_mode, precision_mode,
-                    continuation_of, image_size, created_at, updated_at
+                    continuation_of, image_size, garment_image, created_at,
+                    updated_at
                 ) VALUES (
-                    ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?
                 )
                 """,
                 (
@@ -2039,6 +2170,7 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     precision_mode,
                     continuation_of,
                     image_size,
+                    garment_image,
                     now,
                     now,
                 ),
@@ -2177,11 +2309,11 @@ def delete_job(job_id: str) -> dict[str, str]:
         active_image_user = db.execute(
             """
             SELECT id FROM jobs
-            WHERE input_image = ?
+            WHERE (input_image = ? OR garment_image = ?)
               AND status NOT IN ('succeeded', 'failed', 'cancelled')
             LIMIT 1
             """,
-            (generated_input_name(job_id),),
+            (generated_input_name(job_id), generated_input_name(job_id)),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")

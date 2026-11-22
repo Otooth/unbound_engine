@@ -69,6 +69,14 @@ repository = "Comfy-Org/z_image_turbo"
 revision = "6fc90a3b1b653e935a0d175e260736de25b84df5"
 status = "downloaded_and_verified"
 
+[models.flux2_klein_4b]
+repository = "black-forest-labs/FLUX.2-klein-4b-fp8"
+revision = "5b4408e59397a4a37ccb46afe426d8ed86379441"
+vae_repository = "Comfy-Org/flux2-dev"
+vae_revision = "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"
+text_encoder = "models.z_image_turbo:text_encoders/qwen_3_4b.safetensors"
+status = "downloaded_and_verified"
+
 [automation]
 ollama_version = "0.40.3"
 ollama_model = "qwen3.6:35b-a3b-q8_0"
@@ -92,6 +100,12 @@ source = "workflows/image_z_image_turbo.json"
 source_package = "comfyui-workflow-templates-json==0.1.131"
 source_sha256 = "8e009d7261690f50bbf622d534e77d129f84ffdaa9ee8e05a9c1d82fdf385a85"
 api_path = "workflows/image_z_image_turbo.api.json"
+
+[automation.api_workflows.flux2_klein_outfit_edit]
+source = "workflows/image_flux2_klein_image_edit_4b_distilled.json"
+source_package = "comfyui-workflow-templates-json==0.1.131"
+source_sha256 = "c5e2438f275f038818c89668ed6bdbdd73c998b0c00dee8c8137ac9207535ce8"
+api_path = "workflows/image_flux2_klein_outfit_edit.api.json"
 
 [automation.api_workflows.wan_animate_2]
 source = "workflows/video_wan_animate2_distilled.json"

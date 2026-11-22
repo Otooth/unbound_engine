@@ -36,6 +36,25 @@
 - 実在人物・第三者の作品に似た画像を生成して動画化する場合は、モデルの
   ライセンスとは別に、本人の同意・肖像権・著作権を確認すること。
 
+## FLUX.2 [klein] 4B（服装変更、2026-11-22 確認）
+
+- 本体: `black-forest-labs/FLUX.2-klein-4b-fp8`（固定revision:
+  `5b4408e59397a4a37ccb46afe426d8ed86379441`）
+- ライセンス: Apache-2.0。リポジトリ内 `LICENSE.md` の原文が Apache License
+  2.0 本文であることを確認した。公式 GitHub
+  <https://github.com/black-forest-labs/flux2> の表でも 4B 系は apache-2.0、
+  9B 系と FLUX.2 [dev] は FLUX Non-Commercial License。
+- VAE: `Comfy-Org/flux2-dev` の `split_files/vae/flux2-vae.safetensors`
+  （固定revision: `9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7`）。このリポジトリ
+  自体のタグは非商用ライセンスだが、公式 GitHub に「The autoencoder is
+  released under Apache 2.0」と明記されている。同リポジトリの FLUX.2 [dev]
+  本体・Mistral テキストエンコーダは非商用のため取得しない。
+- テキストエンコーダ: Z-Image と共通の `qwen_3_4b.safetensors`（Apache-2.0）。
+- 9B 版（非商用）は使用しない。
+- 人物画像は本人・同意を得た人物・AIオリジナルの人物に限る。服の画像に
+  ブランドロゴや第三者のデザインが含まれる場合は、商標・意匠・著作権を別途
+  確認すること。
+
 ## LTX-2.5
 
 - 配布元: `Lightricks/LTX-2.5`

@@ -44,6 +44,7 @@ hf-env/bin/python scripts/download-models.py wan14
 hf-env/bin/python scripts/download-models.py ltx25
 hf-env/bin/python scripts/download-models.py animate2
 hf-env/bin/python scripts/download-models.py zimage
+hf-env/bin/python scripts/download-models.py klein
 ```
 
 The downloader uses pinned Hugging Face revisions, verifies file size and
@@ -112,6 +113,8 @@ Choose the engine by input type:
 - `zimage`: text-to-image with Z-Image Turbo (8 steps). Choose
   `"image_size": "square"` (1024×1024, matches Wan 14B and Animate),
   `"landscape"` (1280×720), or `"portrait"` (720×1280) for LTX-2.5.
+- `outfit`: image editing with FLUX.2 [klein] 4B. Replaces the clothing of the
+  person in `input_image` with the outfit in `garment_image`.
 
 ### Generate an image, then animate it
 
@@ -135,6 +138,45 @@ Measured on this DGX Spark: a 1024×1024 image job took 22 seconds end to end
 (11 s Qwen planning, 10 s generation) with 57.2 GB peak system memory. Using
 that image, a 5-second Wan 14B 4-step video took 114 seconds with 56.7 GB peak
 and kept the person, clothing, and background from the image.
+
+### Change only the outfit, then follow a motion video
+
+`outfit` edits a person image with FLUX.2 [klein] 4B (distilled FP8, 4 steps,
+Apache-2.0). Image 1 is the person and image 2 is the outfit; the fixed English
+instruction keeps the face, hair, pose, framing, and background from image 1
+and replaces only the clothing. The optional `concept` adds a note (translated
+to English by Qwen when prompt enhancement is on). Output size follows the
+person image, scaled to about 1 megapixel.
+
+1. Select **FLUX.2 Klein — 人物の服装を画像で差し替え**, choose the person image
+   and the outfit image, and generate. The result is saved like a Z-Image job
+   (`output/jobs/JOB_ID/image.png`, metadata removed, and
+   `input/generated-JOB_ID.png`).
+2. Choose **この画像を動作元動画どおりに動かす（Wan Animate 2）**, attach the
+   motion MP4, describe the scene, and generate. Wan Animate 2 animates the
+   whole edited image; the background comes from that image, not from the
+   motion video. Partial replacement inside the original video is not
+   supported.
+
+Via the API:
+
+```json
+{"engine": "outfit", "input_image": "person.png",
+ "garment_image": "cardigan.png", "concept": ""}
+```
+
+Measured on this DGX Spark: replacing a navy T-shirt with a red cardigan on a
+576×1024 full-body image took 12 seconds end to end (10 s editing) with
+27.5 GB peak system memory; face, hair, trousers, shoes, pose, and background
+were kept. Animating that image with a 5.2-second street-dance MP4 in Wan
+Animate 2 took 372 seconds (25 s Qwen planning) with 57.2 GB peak and produced
+480×832, 24 fps, 81 frames (3.4 s); the cardigan stayed consistent in every
+frame.
+
+Use only images of yourself, consenting people, or AI-original characters.
+Download the model with
+`hf-env/bin/python scripts/download-models.py klein` (about 4.4 GB; the
+Qwen3-4B text encoder is shared with Z-Image).
 
 Prompt enhancement is enabled by default and is constrained to preserve
 character count, age, build, and reciprocal actions. Disable it to send the

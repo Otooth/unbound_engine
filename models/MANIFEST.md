@@ -82,3 +82,20 @@ size and SHA256 of every file matched the values below.
 | `vae/ae.safetensors` | `split_files/vae/ae.safetensors` | 335,304,388 | `afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38` |
 
 Total: 20,690,152,836 bytes.
+
+## FLUX.2 [klein] 4B distilled FP8 (outfit editing)
+
+Sources: `black-forest-labs/FLUX.2-klein-4b-fp8` at
+`5b4408e59397a4a37ccb46afe426d8ed86379441`; VAE from `Comfy-Org/flux2-dev` at
+`9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7`. The text encoder is the Z-Image
+`qwen_3_4b.safetensors` listed above.
+
+Downloaded on 2026-11-23 with `scripts/download-models.py klein`; the local
+size and SHA256 of every file matched the values below.
+
+| Local path | Source path | Size (bytes) | SHA256 |
+|---|---|---:|---|
+| `diffusion_models/flux-2-klein-4b-fp8.safetensors` | `flux-2-klein-4b-fp8.safetensors` | 4,070,624,520 | `97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6` |
+| `vae/flux2-vae.safetensors` | `split_files/vae/flux2-vae.safetensors` | 336,213,556 | `d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5` |
+
+New download: 4,406,838,076 bytes.

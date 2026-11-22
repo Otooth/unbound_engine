@@ -979,3 +979,40 @@ Wan 14B で動画化する。
 
 補足: ComfyUI が直接書き出す中間 PNG（`image_zimage_00001_.png`）にはプロンプトの
 `tEXt` が残る。外部へ出すのは除去済みの `image.png` を使う。
+
+## 2026-11-22 服装変更（FLUX.2 [klein] 4B）の実装
+
+- 目的: 人物画像の服装を、指定した服の画像に差し替えた参照画像を作り、
+  Wan Animate 2 で動作元 MP4 どおりに動かす。動画内の部分置換ではない。
+- モデル選定: FLUX.2 [klein] 4B 蒸留 FP8（追加約4.4GB、Apache-2.0、2画像参照の
+  公式テンプレートあり、テキストエンコーダは Z-Image と共通）を採用。
+  Qwen-Image-Edit-2511（追加約31GB）は見送り（ユーザー選択）。
+
+### 実行コマンド → 期待結果 → 実際の結果
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| コンテナ内 `comfyui-workflow-templates-json` 0.1.131 の編集テンプレート一覧 | 2画像参照の編集テンプレート | `image_flux2_klein_image_edit_4b_distilled.json`（2画像版サブグラフあり）を確認、`workflows/` に複製（sha256 `c5e2438f…`） ✅ |
+| HF API（WebFetch。ホストはオフライン） | サイズ・SHA256・ライセンス | 本体 4,070,624,520 B、VAE 336,213,556 B。本体 `LICENSE.md` 原文は Apache 2.0。VAE は公式 GitHub で Apache 2.0 と明記 ✅ |
+| 2画像サブグラフを平坦化した `workflows/image_flux2_klein_outfit_edit.api.json` を `/object_info` と照合 | 必須入力の欠落・余分なし | 問題なし ✅ |
+| `python3 -m py_compile automation/app.py scripts/download-models.py` | 構文エラーなし | 成功 ✅ |
+| API 再起動後、`garment_image` なし / 存在しないファイル / 動画エンジンで短い concept | 422 / 404 / 422 | 422 / 404 / 422 ✅。DB に `garment_image` 列が追加された ✅ |
+| Z-Image で検証用の服画像（赤いカーディガン、人物なし・ロゴなし）と人物画像（AIオリジナル男性の全身正面）を生成 | 検証素材 | `generated-b26be098-….png`、`generated-0966c196-….png` ✅ |
+| `nmcli connection up Pixel_3494` | Wi-Fi 接続 | `Not authorized to control networking`。ホストはオフラインのため、モデル取得はユーザーの Wi-Fi 接続待ち |
+
+## 2026-11-23 FLUX.2 [klein] 4B 取得と服装変更→Animate 2 の通し確認
+
+- ネットワーク: Wi-Fi `Pixel_3494`（ユーザーが接続）。
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| `hf-env/bin/python scripts/download-models.py klein` | 本体・VAE を取得、qwen_3_4b は既存検証 | 00:11〜00:29（17分）。本体取得中に切断・タイムアウト3回、自動再開。3ファイルとも `OK`（MANIFEST の SHA256 と一致） ✅ |
+| `outfit` ジョブ（人物 `generated-0966c196-…`、服 `generated-b26be098-…`、指示なし、Seed 20261123）。Job `9bbb8f5b-…` | 服だけ赤いカーディガンになり、他は維持 | 12秒で成功（編集10秒）。576×1024。紺Tシャツ→赤カーディガン（白ボタン・Vネック再現、中に白T）。顔・髪・チノパン・靴・ポーズ・背景を維持 ✅ |
+| 同ジョブ中のメモリ（`free -m` 1秒間隔） | 128GB未満 | 待機 13.0GB → ピーク 27.5GB ✅ |
+| 出力 PNG のチャンク確認 | プロンプトなし | `image.png`・`input/generated-…png` とも `IHDR,pHYs,IDAT,IEND`、指示文なし ✅ |
+| 編集画像＋`drive_doll_street_dance.mp4`（5.2秒・24fps のストリートダンス）で `animate2`、Qwen 有効。Job `4347cd00-…` | 動作元どおりに踊り、服装を維持 | 372秒で成功（Qwen 25秒）。480×832、24fps、81フレーム、3.4秒。腕を広げる・膝を曲げる・蹴り上げる動きを転写し、全フレームでカーディガンを維持 ✅ |
+| 同ジョブ中のメモリ | 128GB未満 | 待機 13.0GB → ピーク 57.2GB ✅ |
+| ブラウザーで服装変更ジョブを開き「この画像を動作元動画どおりに動かす（Wan Animate 2）」 | Animate 2 に切替、編集画像を選択 | `engine=animate2`、`existingImage=generated-9bbb8f5b-….png`、`characterView=whole`、参照プレビュー表示 ✅ |
+
+補足: Animate 2 の背景は参照画像（スタジオ）になり、動作元動画の街並みは使われない。
+動作元動画の中の人物だけを着せ替える部分置換は、現行ノードでは未対応。

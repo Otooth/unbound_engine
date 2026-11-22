@@ -192,7 +192,7 @@
             <button type="button" id="clearContinuation">解除</button>
           </div>
           <div class="field">
-            <label for="concept">作りたい映像を日本語で入力</label>
+            <label for="concept" id="conceptLabel">作りたい映像を日本語で入力</label>
             <textarea id="concept" required minlength="10" maxlength="2000"
               placeholder="例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。"></textarea>
           </div>
@@ -205,6 +205,7 @@
                 <option value="wan14">Wan 2.2 14B — 画像を動かす</option>
                 <option value="ltx25">LTX-2.5 — 画像を動かす・音声付き</option>
                 <option value="zimage">Z-Image Turbo — 文章から画像（動画の開始画像に使える）</option>
+                <option value="outfit">FLUX.2 Klein — 人物の服装を画像で差し替え（Wan Animate 2で動かせる）</option>
               </select>
             </div>
             <div class="field" id="imageSizeField" style="display:none">
@@ -233,6 +234,14 @@
               <input type="file" id="imageFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
             </div>
             <div class="hint" id="imageHint">画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。</div>
+          </div>
+          <div class="field" id="garmentField" style="display:none">
+            <label for="garmentImage">着せたい服の画像（必須）</label>
+            <select id="garmentImage"></select>
+            <div class="upload" style="margin-top:8px">
+              <input type="file" id="garmentFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+            </div>
+            <div class="hint">服だけが写った商品画像や、服がはっきり見える写真を指定してください。顔の入れ替えには使いません。本人・同意を得た人物・AIオリジナルの人物の画像だけを使用してください。</div>
           </div>
           <div id="animateFields" style="display:none">
             <div class="row">
@@ -336,6 +345,7 @@
             <div class="events" id="events"></div>
             <button class="cancel-button" id="cancelButton" type="button">生成をキャンセル</button>
             <button class="continue-button" id="continueJobButton" type="button">この動画の続きを作る</button>
+            <button class="continue-button" id="imageToAnimateButton" type="button">この画像を動作元動画どおりに動かす（Wan Animate 2）</button>
             <button class="continue-button" id="imageToVideoButton" type="button">この画像から動画を作る</button>
             <button class="cancel-button" id="deleteJobButton" type="button">この履歴と生成物を削除</button>
             <div class="error" id="error"></div>
@@ -362,12 +372,15 @@
     const imageStatusLabels = {
       generating: "画像を生成中", finishing: "画像を仕上げ中"
     };
+    const imageEngines = ["zimage", "outfit"];
     const stageLabel = (stage, job) =>
-      (job?.engine === "zimage" && imageStatusLabels[stage]) || statusLabels[stage];
+      (imageEngines.includes(job?.engine) && imageStatusLabels[stage]) || statusLabels[stage];
     const engineNames = {
       wan5b: "Wan 5B", wan14: "Wan 14B", ltx25: "LTX-2.5",
-      animate2: "Wan Animate 2", zimage: "Z-Image 画像"
+      animate2: "Wan Animate 2", zimage: "Z-Image 画像", outfit: "服装変更"
     };
+    const defaultConceptPlaceholder =
+      "例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。";
     const progress = { queued: 8, planning: 18, motion: 42, generating: 72, continuing: 78, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
     let activeJob = null;
     let currentJob = null;
@@ -398,7 +411,7 @@
 
     async function loadInputs(selected, targetId = "existingImage") {
       const images = await api("/inputs");
-      ["existingImage", "sideImage", "backImage"].forEach((id) => {
+      ["existingImage", "sideImage", "backImage", "garmentImage"].forEach((id) => {
         const current = id === targetId && selected
           ? selected
           : $(id).value;
@@ -536,6 +549,17 @@
       return result.filename;
     }
 
+    async function uploadGarmentImage() {
+      const file = $("garmentFile").files[0];
+      if (!file) return $("garmentImage").value;
+      const data = new FormData();
+      data.append("file", file);
+      const result = await api("/inputs", { method: "POST", body: data });
+      await loadInputs(result.filename, "garmentImage");
+      $("garmentFile").value = "";
+      return result.filename;
+    }
+
     async function uploadMotionVideo() {
       const file = $("motionFile").files[0];
       if (!file) return null;
@@ -589,6 +613,9 @@
       $("imageToVideoButton").classList.toggle(
         "show", Boolean(done && isImage && job.generated_input)
       );
+      $("imageToAnimateButton").classList.toggle(
+        "show", Boolean(done && isImage && job.generated_input)
+      );
       const terminal = ["succeeded", "failed", "cancelled"].includes(job.status);
       $("submitButton").disabled = !terminal;
       $("cancelButton").classList.toggle("show", !terminal);
@@ -631,7 +658,7 @@
               ? `<button class="delete-job" type="button" data-delete="${job.id}" title="履歴と生成物を削除">削除</button>`
               : ""}
           </div>
-          <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60))}</div>
+          <div style="margin-top:8px">${escapeHtml(job.concept.slice(0, 60) || (job.engine === "outfit" ? "服装を差し替えた画像" : ""))}</div>
           <div class="meta">${escapeHtml(engineNames[job.engine] || job.engine)}${job.continuation_of ? " · 続き" : ""}${job.quality_mode ? " · 画質優先" : ""}${job.precision_mode ? " · 精度優先" : ""} · ${new Date(job.created_at).toLocaleString("ja-JP")}</div>
         </div>`).join("") || '<div class="hint">まだ履歴はありません。</div>';
       document.querySelectorAll("[data-job]").forEach((card) => {
@@ -710,15 +737,19 @@
       $("engine").disabled = false;
       $("continuationBanner").classList.remove("show");
       $("formTitle").textContent = "新しい動画";
-      $("concept").placeholder =
-        "例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。";
+      $("concept").placeholder = defaultConceptPlaceholder;
       $("submitButton").textContent = "動画を生成";
       $("engine").dispatchEvent(new Event("change"));
     }
 
-    function startImageToVideo(job) {
+    function startImageToVideo(job, engine = "wan14") {
       if (continuationSource) clearContinuationMode();
-      $("engine").value = "wan14";
+      $("engine").value = engine;
+      if (engine === "animate2") {
+        $("characterView").value = "whole";
+        $("primaryView").value = "front";
+        $("characterView").dispatchEvent(new Event("change"));
+      }
       $("engine").dispatchEvent(new Event("change"));
       $("imageFile").value = "";
       loadInputs(job.generated_input).then(() => {
@@ -729,8 +760,9 @@
       });
       $("formTitle").textContent = "生成画像から動画";
       $("concept").value = "";
-      $("concept").placeholder =
-        "この画像の人物や物にさせたい動きを入力してください。例：ゆっくり振り返って手を振る。";
+      $("concept").placeholder = engine === "animate2"
+        ? "動作元動画（下でMP4を指定）の動きと場面を入力してください。例：明るい公園で、ゆっくり歩いてから手を振る。"
+        : "この画像の人物や物にさせたい動きを入力してください。例：ゆっくり振り返って手を振る。";
       $("jobForm").scrollIntoView({ behavior: "smooth", block: "start" });
       $("concept").focus({ preventScroll: true });
     }
@@ -738,15 +770,27 @@
     $("engine").addEventListener("change", () => {
       const ltx = $("engine").value === "ltx25";
       const animate = $("engine").value === "animate2";
-      const imageOnly = $("engine").value === "zimage";
-      const imageToVideo = ["wan14", "ltx25", "animate2"].includes($("engine").value);
-      $("imageSizeField").style.display = imageOnly ? "block" : "none";
+      const outfit = $("engine").value === "outfit";
+      const imageOnly = imageEngines.includes($("engine").value);
+      const imageToVideo = ["wan14", "ltx25", "animate2", "outfit"].includes($("engine").value);
+      $("imageSizeField").style.display = $("engine").value === "zimage" ? "block" : "none";
+      $("garmentField").style.display = outfit ? "block" : "none";
       $("shotsField").style.display = imageOnly ? "none" : "block";
       $("qualityField").style.display = imageOnly ? "none" : "block";
+      $("concept").required = !outfit;
+      $("concept").minLength = outfit ? 0 : 10;
+      $("conceptLabel").textContent = outfit
+        ? "追加の指示（任意）"
+        : "作りたい映像を日本語で入力";
+      if (!continuationSource && $("formTitle").textContent !== "生成画像から動画") {
+        $("concept").placeholder = outfit
+          ? "空欄で構いません。例：シャツの裾はズボンの外に出す。袖はまくらない。"
+          : defaultConceptPlaceholder;
+      }
       if (!continuationSource) {
         $("submitButton").textContent = imageOnly ? "画像を生成" : "動画を生成";
-        if (imageOnly) $("formTitle").textContent = "新しい画像";
-        else if ($("formTitle").textContent === "新しい画像") {
+        if (imageOnly) $("formTitle").textContent = outfit ? "服装の差し替え" : "新しい画像";
+        else if (["新しい画像", "服装の差し替え"].includes($("formTitle").textContent)) {
           $("formTitle").textContent = "新しい動画";
         }
       }
@@ -756,10 +800,14 @@
       $("imageField").style.display =
         imageToVideo && !continuationSource ? "block" : "none";
       $("animateFields").style.display = animate ? "block" : "none";
-      $("imageLabel").textContent = animate ? "正面画像（必須）" : "開始画像";
+      $("imageLabel").textContent = animate
+        ? "正面画像（必須）"
+        : outfit ? "人物画像（必須）" : "開始画像";
       $("imageHint").textContent = animate
         ? "正面・側面・背面を登録できますが、生成に使うのは下で選ぶ1面だけです。選択面と同じ向きを保つ動作を使用してください。"
-        : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
+        : outfit
+          ? "顔・髪型・ポーズ・背景はこの画像を保ち、服装だけを差し替えます。Wan Animate 2で動かす場合は、頭から足先まで写った正面の全身画像が適しています。"
+          : "画像の人物・服装・背景が動画に強く引き継がれます。文章だけで別の人物を作りたい場合は「Wan 5B — 文章から動画」を選んでください。";
       $("shots").options[0].textContent = animate ? "約3秒" : "約5秒";
       $("shots").disabled = ltx || animate;
       if (ltx || animate) $("shots").value = "1";
@@ -817,16 +865,23 @@
         }
         const continuation = continuationSource;
         const animate = $("engine").value === "animate2";
+        const outfit = $("engine").value === "outfit";
         const imageToVideo =
           !continuation
-          && ["wan14", "ltx25", "animate2"].includes($("engine").value);
+          && ["wan14", "ltx25", "animate2", "outfit"].includes($("engine").value);
         const image = imageToVideo
           ? await uploadImage(animate ? $("characterView").value : null)
           : null;
         if (imageToVideo && !image) {
           throw new Error(animate
             ? "キャラクター三面図を選択してください。"
-            : "画像を動かすモデルでは開始画像を選択してください。");
+            : outfit
+              ? "服装を差し替える人物画像を選択してください。"
+              : "画像を動かすモデルでは開始画像を選択してください。");
+        }
+        const garmentImage = outfit ? await uploadGarmentImage() : null;
+        if (outfit && !garmentImage) {
+          throw new Error("着せたい服の画像を選択してください。");
         }
         const sideImage = animate
           ? await uploadAdditionalReference("sideImage", "sideFile")
@@ -850,7 +905,7 @@
           ? Number($("seed").value)
           : Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
         $("seed").value = String(seed);
-        const imageOnly = $("engine").value === "zimage";
+        const imageOnly = imageEngines.includes($("engine").value);
         const payload = {
           concept: $("concept").value.trim(),
           engine: $("engine").value,
@@ -858,6 +913,7 @@
           shots: imageOnly ? 1 : Number($("shots").value),
           seed,
           input_image: primaryImage,
+          garment_image: garmentImage,
           reference_front: animate ? image : null,
           reference_side: sideImage,
           reference_back: backImage,
@@ -892,6 +948,10 @@
 
     $("imageToVideoButton").addEventListener("click", () => {
       if (currentJob?.generated_input) startImageToVideo(currentJob);
+    });
+
+    $("imageToAnimateButton").addEventListener("click", () => {
+      if (currentJob?.generated_input) startImageToVideo(currentJob, "animate2");
     });
 
     $("clearContinuation").addEventListener("click", () => {
