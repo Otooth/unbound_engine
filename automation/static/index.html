@@ -73,6 +73,15 @@
       border: 1px solid var(--line); border-radius: 10px;
     }
     .reference-preview.show { display: block; }
+    .motion-preview {
+      display: block; width: min(100%, 260px); max-height: 360px; margin: 10px auto 0;
+      background: #050609; border: 1px solid var(--line); border-radius: 10px;
+    }
+    .trim-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-top: 10px; }
+    .trim-button {
+      border: 1px solid #416e69; border-radius: 11px; padding: 12px 13px;
+      color: #9df1e6; background: #14332f; cursor: pointer;
+    }
     input[type="range"] { width: 100%; accent-color: var(--accent); }
     .mode-switch {
       display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
@@ -296,6 +305,17 @@
                 <input type="file" id="motionFile" accept=".mp4,video/mp4">
               </div>
               <div class="hint">指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。</div>
+              <div id="motionTrimField" style="display:none">
+                <video id="motionPreview" class="motion-preview" controls muted playsinline></video>
+                <div class="trim-row">
+                  <div>
+                    <label for="motionStart">使い始める位置（秒）</label>
+                    <input type="number" id="motionStart" min="0" step="0.1" value="0">
+                  </div>
+                  <button type="button" id="motionStartFromPlayer" class="trim-button">今の再生位置から使う</button>
+                </div>
+                <div class="hint" id="motionRangeHint"></div>
+              </div>
             </div>
           </div>
           <div class="field" id="qualityField">
@@ -364,6 +384,7 @@
     const $ = (id) => document.getElementById(id);
     const statusLabels = {
       queued: "順番待ち", planning: "プロンプトを設計中", motion: "動作の下書きを生成中",
+      trimming: "動作元動画を切り出し中",
       generating: "動画を生成中", continuing: "次の区間へ接続中",
       finishing: "動画を仕上げ中", extending: "元動画と続きを連結中",
       succeeded: "完成", failed: "失敗",
@@ -381,7 +402,7 @@
     };
     const defaultConceptPlaceholder =
       "例：白いドラゴン戦士がゆっくり手を上げ、カメラが周囲を回る。柔らかな朝の光。";
-    const progress = { queued: 8, planning: 18, motion: 42, generating: 72, continuing: 78, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
+    const progress = { queued: 8, planning: 18, trimming: 30, motion: 42, generating: 72, continuing: 78, finishing: 90, extending: 95, succeeded: 100, failed: 100, cancelled: 100 };
     let activeJob = null;
     let currentJob = null;
     let continuationSource = null;
@@ -835,6 +856,43 @@
         $("error").textContent = error.message;
       });
     });
+    let motionPreviewUrl = null;
+
+    function updateMotionRangeHint() {
+      const preview = $("motionPreview");
+      const start = Math.max(0, Number($("motionStart").value) || 0);
+      const duration = Number.isFinite(preview.duration) ? preview.duration : 0;
+      const end24 = start + 81 / 24;
+      $("motionRangeHint").textContent = duration && start >= duration
+        ? `動画の長さ（${duration.toFixed(1)}秒）より前の位置を指定してください。`
+        : `${start.toFixed(1)}秒から81フレーム分を使います（24fpsの動画なら${start.toFixed(1)}〜${end24.toFixed(1)}秒、30fpsなら約2.7秒間）。`
+          + (duration && end24 > duration ? " 残りが短い場合は生成前にエラーになります。" : "");
+    }
+
+    $("motionFile").addEventListener("change", () => {
+      const file = $("motionFile").files[0];
+      if (motionPreviewUrl) URL.revokeObjectURL(motionPreviewUrl);
+      motionPreviewUrl = file ? URL.createObjectURL(file) : null;
+      $("motionPreview").src = motionPreviewUrl || "";
+      $("motionStart").value = "0";
+      $("motionTrimField").style.display = file ? "block" : "none";
+      updateMotionRangeHint();
+    });
+    $("motionPreview").addEventListener("loadedmetadata", () => {
+      $("motionStart").max = String(Math.max(0, $("motionPreview").duration - 0.1));
+      updateMotionRangeHint();
+    });
+    $("motionStart").addEventListener("input", () => {
+      const start = Number($("motionStart").value) || 0;
+      if (Number.isFinite($("motionPreview").duration)) $("motionPreview").currentTime = start;
+      updateMotionRangeHint();
+    });
+    $("motionStartFromPlayer").addEventListener("click", () => {
+      $("motionPreview").pause();
+      $("motionStart").value = $("motionPreview").currentTime.toFixed(1);
+      updateMotionRangeHint();
+    });
+
     $("imageFile").addEventListener("change", () => {
       updateCharacterPreview().catch((error) => {
         $("error").textContent = error.message;
@@ -918,6 +976,7 @@
           reference_side: sideImage,
           reference_back: backImage,
           driving_video: drivingVideo,
+          motion_start: drivingVideo ? Math.max(0, Number($("motionStart").value) || 0) : 0,
           enhance_prompt: $("enhancePrompt").checked,
           quality_mode: !imageOnly && qualityMode,
           precision_mode: $("engine").value === "wan14" && $("precisionMode").checked,

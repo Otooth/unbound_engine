@@ -157,6 +157,12 @@ person image, scaled to about 1 megapixel.
    whole edited image; the background comes from that image, not from the
    motion video. Partial replacement inside the original video is not
    supported.
+3. Wan Animate 2 uses 81 frames of the motion video (3.4 s at 24 fps). To use
+   a later part of a longer MP4, play it in the preview and choose
+   **今の再生位置から使う**, or pass `"motion_start": 12.5` (seconds) via the
+   API. The job re-encodes the MP4 from that position into
+   `input/motion-trim-JOB_ID.mp4` (removed with the job) and fails before
+   generation if fewer than 81 frames remain.
 
 Via the API:
 

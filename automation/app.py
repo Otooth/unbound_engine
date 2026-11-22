@@ -155,6 +155,8 @@ ENGINE_CONFIG: dict[str, dict[str, Any]] = {
 }
 VIDEO_ENGINES = ("wan5b", "wan14", "ltx25", "animate2")
 IMAGE_ENGINES = ("zimage", "outfit")
+# WanAnimate2ToVideo "length" in the Animate 2 workflow.
+ANIMATE_FRAMES = 81
 OUTFIT_EDIT_INSTRUCTION = (
     "Dress the person in image 1 in the outfit shown in image 2. Replace "
     "only their clothing with the garments from image 2, reproducing the "
@@ -234,6 +236,7 @@ def init_db() -> None:
                 continuation_of TEXT NOT NULL DEFAULT '',
                 image_size TEXT NOT NULL DEFAULT '',
                 garment_image TEXT NOT NULL DEFAULT '',
+                motion_start REAL NOT NULL DEFAULT 0,
                 plan_json TEXT,
                 output_path TEXT,
                 error TEXT,
@@ -294,6 +297,13 @@ def init_db() -> None:
                 """
                 ALTER TABLE jobs
                 ADD COLUMN garment_image TEXT NOT NULL DEFAULT ''
+                """
+            )
+        if "motion_start" not in columns:
+            db.execute(
+                """
+                ALTER TABLE jobs
+                ADD COLUMN motion_start REAL NOT NULL DEFAULT 0
                 """
             )
         if "driving_video" not in columns:
@@ -1206,7 +1216,7 @@ def output_relative_path(
     )
 
 
-def docker_group_run(command: list[str], timeout: int = 300) -> None:
+def docker_group_run(command: list[str], timeout: int = 300) -> str:
     result = subprocess.run(
         ["sg", "docker", "-c", shlex.join(command)],
         cwd=PROJECT_ROOT,
@@ -1218,6 +1228,80 @@ def docker_group_run(command: list[str], timeout: int = 300) -> None:
         raise RuntimeError(
             f"{shlex.join(command)} failed: {result.stderr or result.stdout}"
         )
+    return result.stdout
+
+
+def trimmed_motion_name(job_id: str) -> str:
+    return f"motion-trim-{job_id}.mp4"
+
+
+def trim_driving_video(job_id: str, source: str, start: float) -> str:
+    trimmed = trimmed_motion_name(job_id)
+    container_output = f"/opt/ComfyUI/output/jobs/{job_id}/motion_trim.mp4"
+    docker_group_run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "comfyui",
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start:.3f}",
+            "-i",
+            f"/opt/ComfyUI/input/{source}",
+            "-t",
+            "20",
+            "-an",
+            "-map_metadata",
+            "-1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "12",
+            "-pix_fmt",
+            "yuv420p",
+            "-y",
+            container_output,
+        ],
+        timeout=300,
+    )
+    frames = docker_group_run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "comfyui",
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-count_packets",
+            "-show_entries",
+            "stream=nb_read_packets",
+            "-of",
+            "csv=p=0",
+            container_output,
+        ],
+        timeout=120,
+    ).strip()
+    if not frames.isdigit() or int(frames) < ANIMATE_FRAMES:
+        raise RuntimeError(
+            f"The motion video has only {frames or 0} frames after "
+            f"{start:.1f} s; Wan Animate 2 needs {ANIMATE_FRAMES}. "
+            "Choose an earlier start position."
+        )
+    shutil.copy2(
+        OUTPUT_ROOT / "jobs" / job_id / "motion_trim.mp4", INPUT_ROOT / trimmed
+    )
+    return trimmed
 
 
 def finish_wan(job_id: str, shot_paths: list[str]) -> str:
@@ -1638,6 +1722,15 @@ def process_job(job_id: str) -> None:
         job_dir.chmod(0o777)
 
         driving_video = row["driving_video"]
+        if engine == "animate2" and driving_video and row["motion_start"] > 0:
+            add_event(
+                job_id,
+                "trimming",
+                f"Using the motion video from {row['motion_start']:.1f} s",
+            )
+            driving_video = trim_driving_video(
+                job_id, driving_video, row["motion_start"]
+            )
         if engine == "animate2" and not driving_video:
             add_event(job_id, "motion", "Generating motion guide from text")
             draft_config = ENGINE_CONFIG["wan5b"]
@@ -1837,6 +1930,7 @@ class JobCreate(BaseModel):
         default=None,
         pattern=r"^[A-Za-z0-9_.-]+\.mp4$",
     )
+    motion_start: float = Field(default=0, ge=0, le=3600)
     shots: int = Field(default=1, ge=1, le=3)
     seed: int = Field(
         default_factory=lambda: int.from_bytes(os.urandom(8), "big")
@@ -1889,6 +1983,12 @@ class JobCreate(BaseModel):
             )
         if self.engine == "animate2" and self.shots != 1:
             raise ValueError("Wan Animate 2 jobs are limited to one shot")
+        if self.motion_start and not (
+            self.engine == "animate2" and self.driving_video
+        ):
+            raise ValueError(
+                "motion_start applies only to a Wan Animate 2 motion video"
+            )
         if self.engine == "ltx25":
             if not self.ltx_license_acknowledged:
                 raise ValueError(
@@ -2147,11 +2247,11 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     id, status, engine, concept, input_image, reference_front,
                     reference_side, reference_back, driving_video, shots, seed,
                     enhance_prompt, quality_mode, precision_mode,
-                    continuation_of, image_size, garment_image, created_at,
-                    updated_at
+                    continuation_of, image_size, garment_image, motion_start,
+                    created_at, updated_at
                 ) VALUES (
                     ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?
+                    ?, ?, ?
                 )
                 """,
                 (
@@ -2171,6 +2271,7 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     continuation_of,
                     image_size,
                     garment_image,
+                    request.motion_start,
                     now,
                     now,
                 ),
@@ -2281,6 +2382,7 @@ def remove_job_files(job_id: str) -> None:
     for pattern in (
         f"continuation-{job_id}-*.png",
         f"motion-guide-{job_id}.mp4",
+        trimmed_motion_name(job_id),
         generated_input_name(job_id),
     ):
         for path in INPUT_ROOT.glob(pattern):
