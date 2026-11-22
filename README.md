@@ -206,7 +206,8 @@ consecutive segments. The final frame of each segment becomes the start image
 of the next segment before lossless concatenation. Prompt planning also treats
 all segments as one continuous take, avoiding the former five-second reset.
 
-Any completed Wan 5B or Wan 14B job can be extended:
+Any completed video job (Wan 5B, Wan 14B, LTX-2.5, or Wan Animate 2) can be
+extended:
 
 1. Open it from **最近の生成** and choose **この動画の続きを作る**.
 2. Enter only the new action that happens after the existing ending and choose
@@ -218,8 +219,28 @@ Any completed Wan 5B or Wan 14B job can be extended:
 An extended result can be extended again. The source job cannot be deleted
 while its continuation is queued or running. The API equivalent is
 `"continuation_of": "SOURCE_JOB_UUID"` in `POST /jobs`; the engine must match
-the source. This feature is limited to Wan 5B and Wan 14B because their fixed
-workflows support frame-to-frame segment continuation.
+the source.
+
+Engine-specific behavior:
+
+- **LTX-2.5**: the final frame becomes the next start image, and audio is
+  regenerated for the new clip. The license acknowledgement is still required.
+  `extended.mp4` keeps the source's embedded ComfyUI metadata because the LTX
+  license forbids removing provenance signals; the per-clip originals stay in
+  the job folder. Measured: 5 s source + 5 s continuation in 43 s,
+  10.125 s / 162 frames with audio, peak about 59GB.
+- **Wan Animate 2**: the character images of the source are reused and the
+  final frame is passed to `continue_motion`, with the frame offset carried
+  over (the duplicated first frame is dropped, so each continuation adds
+  80 frames). The prompt is optional. Leave the motion MP4 empty to keep
+  tracing the source's motion MP4 from where it stopped (if fewer than 81
+  frames remain, the last pose is held), or choose a new MP4 and start time.
+  It is converted to the source's frame rate. If the source used a generated
+  motion guide, enter the next action instead. Measured: 343 s per
+  continuation, 161 frames at 24 fps, peak about 55GB.
+
+Wan 5B, Wan 14B, and LTX-2.5 keep the boundary frame from both clips (one
+repeated frame). The source and its continuation must use the same engine.
 
 Prompt planning keeps instructions as ordered steps:
 

@@ -208,7 +208,8 @@ single-segment modes in the current fixed workflows.
 
 ## A completed video needs more footage
 
-Open a succeeded Wan 5B or Wan 14B job and click **この動画の続きを作る**.
+Open any succeeded video job (Wan 5B, Wan 14B, LTX-2.5, or Wan Animate 2) and
+click **この動画の続きを作る**.
 Enter only what happens next; do not repeat the earlier action. The added
 duration selector controls the new footage, while the result player shows one
 combined video containing the source and continuation.
@@ -231,9 +232,16 @@ If the endpoint returns `409`:
 - the source output may be missing; or
 - an active continuation may still depend on a source being deleted.
 
-LTX-2.5 and Wan Animate 2 continuation are not exposed: LTX provenance output
-is not concatenated, and Animate 2 cannot preserve a motion sequence's hidden
-pose state from only its final frame.
+For Wan Animate 2, a `409` can also mean the source's motion MP4 has no frames
+left; choose a new motion MP4 or enter the next action. If the continuation
+freezes near its end, the remaining source motion was shorter than 81 frames
+and the last pose was held. Choose a longer or new motion MP4 to avoid this.
+Animate 2 continuations reuse the source's character images; to change them,
+start a new job instead.
+
+LTX-2.5 continuation `extended.mp4` intentionally keeps the source's embedded
+metadata. Do not apply `strip-metadata.sh` to LTX output until the license's
+provenance clause is confirmed (see `docs/licenses.md`).
 
 ## A turnaround sheet creates three characters
 

@@ -1050,3 +1050,24 @@ Wan 14B で動画化する。
 |---|---|---|
 | 修正前: `reference_side: ""` / `garment_image: ""` で `POST /jobs` | 再現 | 両方ともパターン違反の 422 ✅（再現） |
 | 修正後: `reference_side: ""`, `reference_back: ""` で `POST /jobs`（存在しない動作元を指定） | 受付後、動作元なしで失敗 | `queued` → `Driving video does not exist`、`reference_side` は `''` で保存 ✅。テストジョブは削除 |
+
+## 2026-11-23 すべての動画モデルで「続きを作る」に対応
+
+- 対象を Wan 5B / 14B から LTX-2.5 と Wan Animate 2 にも拡大。
+- LTX-2.5: 親の最終フレームを開始画像にして生成し、親と `-c copy` で連結（音声も連結）。ライセンスの来歴情報除去禁止に配慮し、`extended.mp4` は親の埋め込みメタデータを `-map_metadata 1 -movflags use_metadata_tags` で引き継ぐ。
+- Wan Animate 2: 親のキャラクター画像を再利用し、最終フレームを `continue_motion`、`video_frame_offset` に親の終了位置を渡す。ノード出力4（trim_image）で重複1フレームを除いてから連結。動作元は「空欄なら親の動作元MP4の続き」「新しいMP4を指定するとその開始位置から（親のfpsへ変換）」。動作ガイド由来の親では次の動作の指示文が必要。
+- UI: 完成動画すべてに「この動画の続きを作る」を表示。Animate 2 の続きでは動作元MP4欄だけを表示し、指示文は任意。
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| LTX 続き・ライセンス確認なしで `POST /jobs` | 422 | 422 ✅ |
+| Animate 2 親を wan14 で続ける | 409 | `A continuation must use the same video engine` ✅ |
+| LTX 新規（服装変更画像・手を振る）Job `cdb2f0a7-…` | 成功 | 51秒・ピーク約59.4GB・640×640・16fps・81フレーム＋音声 ✅ |
+| 上記の続き（一歩踏み出して腰に手）Job `182928fc-…` | 連結動画 | 43秒・ピーク約59.0GB。`extended.mp4` 10.125秒・162フレーム・音声10.13秒 ✅ |
+| 同 `extended.mp4` のメタデータ | 親の `prompt` タグを保持 | 初回は concat demuxer で消失 → 親を2入力目にして `-map_metadata 1 -movflags use_metadata_tags` に修正し再連結、保持を確認 ✅ |
+| Animate 2 親 `4347cd00-…` の続き・動作元空欄・指示文空。Job `f6e26278-…` | 元MP4の81フレーム目から継続 | 343秒・ピーク約54.8GB。`Continuing the source motion video from frame 81`、`extended.mp4` 161フレーム（81＋80）・24fps ✅ |
+| 同親の続き・新しいMP4（`drive_doll_street_dance.mp4` 0秒から）。Job `c558f699-…` | 指定MP4で継続 | 334秒・ピーク約53.9GB。`Using the motion video from 0.0 s at 24/1 fps`、161フレーム ✅ |
+| 3本の境界前後（76〜87フレーム）を一覧化 | 人物・背景・照明が連続 | 3本とも同一人物・同一背景で接続。Animate 2 は元動画の振り付けの続き／新MP4の開始姿勢へ自然に移行 ✅ |
+| ブラウザーで Animate 2 完成ジョブの「続きを作る」→解除 | 動作元欄のみ表示、指示文任意、解除で元に戻る | 開始画像・側面画像欄は非表示、`required=false`、解除後は通常表示 ✅ |
+
+- 既知の制約: Wan 5B / 14B / LTX は境界フレームが両方に残る（1フレーム重複、従来どおり）。Animate 2 で元MP4の残りが81フレーム未満だと最後の姿勢で静止する（今回の素材は残り44フレーム）。

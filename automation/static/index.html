@@ -73,6 +73,7 @@
       border: 1px solid var(--line); border-radius: 10px;
     }
     .reference-preview.show { display: block; }
+    #animateFields.continuation > :not(#motionField) { display: none; }
     .motion-preview {
       display: block; width: min(100%, 260px); max-height: 360px; margin: 10px auto 0;
       background: #050609; border: 1px solid var(--line); border-radius: 10px;
@@ -299,12 +300,12 @@
               <img id="characterPreview" class="reference-preview" alt="切り出したキャラクターのプレビュー">
               <div class="hint">全身が頭から足先まで1人だけ表示され、文字や別のビューが入っていないことを確認してください。白い余白は、縦長画像が頭部だけに中央クロップされるのを防ぎます。</div>
             </div>
-            <div class="field">
+            <div class="field" id="motionField">
               <label for="motionFile">動作元動画（MP4・任意）</label>
               <div class="upload">
                 <input type="file" id="motionFile" accept=".mp4,video/mp4">
               </div>
-              <div class="hint">指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。</div>
+              <div class="hint" id="motionHint">指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。</div>
               <div id="motionTrimField" style="display:none">
                 <video id="motionPreview" class="motion-preview" controls muted playsinline></video>
                 <div class="trim-row">
@@ -646,7 +647,7 @@
       $("continueJobButton").classList.toggle(
         "show",
         job.status === "succeeded"
-          && ["wan5b", "wan14"].includes(job.engine)
+          && job.output_type === "video"
           && Boolean(job.output_url)
       );
     }
@@ -740,11 +741,21 @@
       $("imageField").style.display = "none";
       $("continuationBanner").classList.add("show");
       $("continuationLabel").textContent =
-        `${job.engine === "wan14" ? "Wan 14B" : "Wan 5B"} · ${job.id.slice(0, 8)}…`;
+        `${engineNames[job.engine] || job.engine} · ${job.id.slice(0, 8)}…`;
       $("formTitle").textContent = "続きの動画";
       $("concept").value = "";
-      $("concept").placeholder =
-        "元動画の直後に起こる新しい動作だけを入力してください。以前の動作は書き直さないでください。";
+      $("motionFile").value = "";
+      $("motionFile").dispatchEvent(new Event("change"));
+      updateConceptRequirement();
+      if (job.engine === "animate2") {
+        $("concept").placeholder =
+          "空欄なら、元動画で使った動作元MP4の続きをなぞります。新しいMP4を指定するとその動きで続けます。動作元MP4がない場合は、次の動きを文章で入力してください。";
+        $("motionHint").textContent =
+          "続きでは同じキャラクター画像を使い、元動画の最終フレームから動きをつなげます。新しいMP4はフレームレートを元動画に合わせてから使います。";
+      } else {
+        $("concept").placeholder =
+          "元動画の直後に起こる新しい動作だけを入力してください。以前の動作は書き直さないでください。";
+      }
       $("shots").value = String(Math.max(1, Math.min(3, Number(job.shots) || 1)));
       setQualityMode(Boolean(job.quality_mode));
       $("precisionMode").checked = Boolean(job.precision_mode);
@@ -756,6 +767,8 @@
     function clearContinuationMode() {
       continuationSource = null;
       $("engine").disabled = false;
+      $("motionHint").textContent =
+        "指定するとその人物の動きを転写します。未指定の場合は、入力した文章から動作の下書き動画を自動生成します（追加時間がかかります）。";
       $("continuationBanner").classList.remove("show");
       $("formTitle").textContent = "新しい動画";
       $("concept").placeholder = defaultConceptPlaceholder;
@@ -812,6 +825,7 @@
       $("imageField").style.display =
         imageToVideo && !continuationSource ? "block" : "none";
       $("animateFields").style.display = animate ? "block" : "none";
+      $("animateFields").classList.toggle("continuation", Boolean(continuationSource));
       $("imageLabel").textContent = animate
         ? "正面画像（必須）"
         : outfit ? "人物画像（必須）" : "開始画像";
@@ -849,7 +863,8 @@
     });
     function updateConceptRequirement() {
       const outfit = $("engine").value === "outfit";
-      const trace = $("engine").value === "animate2" && $("motionFile").files.length > 0;
+      const trace = $("engine").value === "animate2"
+        && ($("motionFile").files.length > 0 || Boolean(continuationSource));
       const optional = outfit || trace;
       $("concept").required = !optional;
       $("concept").minLength = optional ? 0 : 10;
@@ -954,19 +969,20 @@
         if (outfit && !garmentImage) {
           throw new Error("着せたい服の画像を選択してください。");
         }
-        const sideImage = animate
+        const newAnimate = animate && !continuation;
+        const sideImage = newAnimate
           ? await uploadAdditionalReference("sideImage", "sideFile")
           : null;
-        const backImage = animate
+        const backImage = newAnimate
           ? await uploadAdditionalReference("backImage", "backFile")
           : null;
         const selectedReferences = {
           front: image, side: sideImage, back: backImage
         };
-        const primaryImage = animate
+        const primaryImage = newAnimate
           ? selectedReferences[$("primaryView").value]
           : image;
-        if (animate && !primaryImage) {
+        if (newAnimate && !primaryImage) {
           throw new Error(
             `今回使用する${{front: "正面", side: "側面", back: "背面"}[$("primaryView").value]}画像を選択してください。`
           );

@@ -114,6 +114,9 @@ ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "negative_node": "261:4",
         "image_node": "189",
         "video_node": "240",
+        "animate_node": "261:247",
+        "decode_node": "261:6",
+        "create_video_node": "245",
         "seed_node": "261:19",
         "seed_field": "noise_seed",
         "save_node": "246",
@@ -1248,9 +1251,71 @@ def trimmed_motion_name(job_id: str) -> str:
     return f"motion-trim-{job_id}.mp4"
 
 
-def trim_driving_video(job_id: str, source: str, start: float) -> str:
+def probe_video(container_path: str, entries: str) -> str:
+    return docker_group_run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "comfyui",
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-count_packets",
+            "-show_entries",
+            f"stream={entries}",
+            "-of",
+            "csv=p=0",
+            container_path,
+        ],
+        timeout=120,
+    ).strip()
+
+
+def input_video_frames(filename: str) -> int:
+    frames = probe_video(f"/opt/ComfyUI/input/{filename}", "nb_read_packets")
+    return int(frames) if frames.isdigit() else 0
+
+
+def output_video_fps(relative: str) -> str:
+    rate = probe_video(f"/opt/ComfyUI/output/{relative}", "r_frame_rate")
+    if not re.fullmatch(r"\d+/\d+", rate) or rate.startswith("0/"):
+        raise RuntimeError(f"Could not read the frame rate of {relative}")
+    return rate
+
+
+def parent_motion_state(parent: sqlite3.Row) -> tuple[str, int] | None:
+    """Return the user motion video a Wan Animate 2 job used and its end frame."""
+    try:
+        plan = json.loads(parent["plan_json"] or "{}")
+    except json.JSONDecodeError:
+        plan = {}
+    source = plan.get("motion_source")
+    end = plan.get("motion_offset_end")
+    if plan.get("motion_kind") == "video" and isinstance(source, str):
+        if isinstance(end, int) and (INPUT_ROOT / source).is_file():
+            return source, end
+        return None
+    if plan.get("motion_kind") == "guide" or not parent["driving_video"]:
+        return None
+    if parent["motion_start"] > 0:
+        source = trimmed_motion_name(parent["id"])
+    else:
+        source = parent["driving_video"]
+    if not (INPUT_ROOT / source).is_file():
+        return None
+    return source, ANIMATE_FRAMES
+
+
+def trim_driving_video(
+    job_id: str, source: str, start: float, fps: str | None = None
+) -> str:
     trimmed = trimmed_motion_name(job_id)
     container_output = f"/opt/ComfyUI/output/jobs/{job_id}/motion_trim.mp4"
+    frame_rate_filter = ["-vf", f"fps={fps}"] if fps else []
     docker_group_run(
         [
             "docker",
@@ -1267,7 +1332,8 @@ def trim_driving_video(job_id: str, source: str, start: float) -> str:
             "-i",
             f"/opt/ComfyUI/input/{source}",
             "-t",
-            "20",
+            "600",
+            *frame_rate_filter,
             "-an",
             "-map_metadata",
             "-1",
@@ -1284,27 +1350,7 @@ def trim_driving_video(job_id: str, source: str, start: float) -> str:
         ],
         timeout=300,
     )
-    frames = docker_group_run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "comfyui",
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=nb_read_packets",
-            "-of",
-            "csv=p=0",
-            container_output,
-        ],
-        timeout=120,
-    ).strip()
+    frames = probe_video(container_output, "nb_read_packets")
     if not frames.isdigit() or int(frames) < ANIMATE_FRAMES:
         raise RuntimeError(
             f"The motion video has only {frames or 0} frames after "
@@ -1430,6 +1476,7 @@ def combine_continuation_videos(
     job_id: str,
     parent_relative: str,
     continuation_relative: str,
+    keep_metadata: bool = False,
 ) -> str:
     output_root = OUTPUT_ROOT.resolve()
     for relative in (parent_relative, continuation_relative):
@@ -1467,8 +1514,20 @@ def combine_continuation_videos(
             "0",
             "-i",
             f"/opt/ComfyUI/output/jobs/{job_id}/extend-concat.txt",
-            "-map_metadata",
-            "-1",
+            *(
+                [
+                    "-i",
+                    f"/opt/ComfyUI/output/{parent_relative}",
+                    "-map",
+                    "0",
+                    "-map_metadata",
+                    "1",
+                    "-movflags",
+                    "use_metadata_tags",
+                ]
+                if keep_metadata
+                else ["-map_metadata", "-1"]
+            ),
             "-c",
             "copy",
             "-y",
@@ -1646,9 +1705,27 @@ def process_job(job_id: str) -> None:
             ):
                 raise FileNotFoundError("Driving video does not exist")
 
+        motion_source: str | None = None
+        motion_offset = 0
+        continue_frame: str | None = None
+        if engine == "animate2" and parent is not None:
+            continue_frame = f"continuation-{job_id}-00.png"
+            if not (INPUT_ROOT / continue_frame).is_file():
+                raise FileNotFoundError(
+                    "The source video's final frame is missing"
+                )
+            if not row["driving_video"]:
+                state = parent_motion_state(parent)
+                if state is not None and input_video_frames(state[0]) > state[1]:
+                    motion_source, motion_offset = state
+                elif not row["concept"].strip():
+                    raise RuntimeError(
+                        "The source video's motion video has no frames left. "
+                        "Attach a new motion MP4 or describe the next motion."
+                    )
         trace_only = (
             engine == "animate2"
-            and bool(row["driving_video"])
+            and bool(row["driving_video"] or motion_source)
             and not row["concept"].strip()
         )
         if trace_only:
@@ -1750,15 +1827,31 @@ def process_job(job_id: str) -> None:
         job_dir.chmod(0o777)
 
         driving_video = row["driving_video"]
-        if engine == "animate2" and driving_video and row["motion_start"] > 0:
+        if engine == "animate2" and driving_video and (
+            row["motion_start"] > 0 or parent is not None
+        ):
+            parent_fps = (
+                output_video_fps(parent["output_path"])
+                if parent is not None
+                else None
+            )
             add_event(
                 job_id,
                 "trimming",
-                f"Using the motion video from {row['motion_start']:.1f} s",
+                f"Using the motion video from {row['motion_start']:.1f} s"
+                + (f" at {parent_fps} fps" if parent_fps else ""),
             )
             driving_video = trim_driving_video(
-                job_id, driving_video, row["motion_start"]
+                job_id, driving_video, row["motion_start"], parent_fps
             )
+        if motion_source is not None:
+            add_event(
+                job_id,
+                "trimming",
+                f"Continuing the source motion video from frame {motion_offset}",
+            )
+            driving_video = motion_source
+        motion_kind = "video" if driving_video else "guide"
         if engine == "animate2" and not driving_video:
             add_event(job_id, "motion", "Generating motion guide from text")
             draft_config = ENGINE_CONFIG["wan5b"]
@@ -1785,6 +1878,22 @@ def process_job(job_id: str) -> None:
                 INPUT_ROOT / driving_video,
             )
             free_comfy()
+        if engine == "animate2":
+            plan.update(
+                {
+                    "motion_kind": motion_kind,
+                    "motion_source": driving_video,
+                    "motion_offset_end": max(
+                        0, motion_offset - (1 if continue_frame else 0)
+                    )
+                    + ANIMATE_FRAMES,
+                }
+            )
+            with db_connect() as db:
+                db.execute(
+                    "UPDATE jobs SET plan_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(plan, ensure_ascii=False), utc_now(), job_id),
+                )
 
         template = json.loads(config["workflow"].read_text())
         shot_paths: list[str] = []
@@ -1842,6 +1951,33 @@ def process_job(job_id: str) -> None:
             video_node = config.get("video_node")
             if video_node is not None:
                 workflow[video_node]["inputs"]["file"] = driving_video
+            if engine == "animate2":
+                animate_node = config["animate_node"]
+                workflow[animate_node]["inputs"]["video_frame_offset"] = (
+                    motion_offset
+                )
+                if continue_frame is not None:
+                    workflow["continue_motion_image"] = {
+                        "class_type": "LoadImage",
+                        "inputs": {"image": continue_frame},
+                    }
+                    workflow[animate_node]["inputs"]["continue_motion"] = [
+                        "continue_motion_image",
+                        0,
+                    ]
+                    # The first decoded frame repeats the source video's last
+                    # frame; trim_image (output 4) says how many to drop.
+                    workflow["continue_motion_trim"] = {
+                        "class_type": "ImageFromBatch",
+                        "inputs": {
+                            "image": [config["decode_node"], 0],
+                            "batch_index": [animate_node, 4],
+                            "length": 4096,
+                        },
+                    }
+                    workflow[config["create_video_node"]]["inputs"][
+                        "images"
+                    ] = ["continue_motion_trim", 0]
             workflow[config["seed_node"]]["inputs"][
                 config["seed_field"]
             ] = row["seed"] + index - 1
@@ -1886,7 +2022,10 @@ def process_job(job_id: str) -> None:
                 "Combining the source video and its continuation",
             )
             final_relative = combine_continuation_videos(
-                job_id, parent["output_path"], final_relative
+                job_id,
+                parent["output_path"],
+                final_relative,
+                keep_metadata=engine == "ltx25",
             )
         raise_if_cancelled(job_id)
         finish_job(job_id, "succeeded", output_path=final_relative)
@@ -1998,8 +2137,11 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_ltx(self) -> "JobCreate":
+        # An Animate 2 continuation may keep reading its source motion video;
+        # create_job checks whether that video still has frames.
         prompt_optional = self.engine == "outfit" or (
-            self.engine == "animate2" and bool(self.driving_video)
+            self.engine == "animate2"
+            and bool(self.driving_video or self.continuation_of)
         )
         if not prompt_optional and len(self.concept.strip()) < 10:
             raise ValueError("concept must contain at least 10 characters")
@@ -2015,10 +2157,6 @@ class JobCreate(BaseModel):
         ):
             raise ValueError(
                 "Outfit editing needs both a person image and an outfit image"
-            )
-        if self.continuation_of and self.engine not in {"wan5b", "wan14"}:
-            raise ValueError(
-                "Continuation is currently available for Wan 5B and Wan 14B"
             )
         if self.precision_mode and self.engine != "wan14":
             raise ValueError("precision_mode is only available for Wan 14B")
@@ -2244,6 +2382,9 @@ def create_job(request: JobCreate) -> dict[str, Any]:
     quality_mode = 0 if is_image else int(request.quality_mode)
     precision_mode = int(request.precision_mode)
     image_size = request.image_size if request.engine == "zimage" else ""
+    reference_front = request.reference_front or ""
+    reference_side = request.reference_side or ""
+    reference_back = request.reference_back or ""
     if is_outfit:
         try:
             resolved_input(input_image, "Person image")
@@ -2272,10 +2413,31 @@ def create_job(request: JobCreate) -> dict[str, Any]:
             )
         quality_mode = int(parent["quality_mode"])
         precision_mode = int(parent["precision_mode"])
+        if request.engine == "animate2" and not request.driving_video:
+            state = parent_motion_state(parent)
+            frames_left = (
+                input_video_frames(state[0]) - state[1] if state else 0
+            )
+            if frames_left <= 0 and len(request.concept.strip()) < 10:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The source video's motion MP4 has no frames left. "
+                    "Attach a new motion MP4 or describe the next motion "
+                    "in at least 10 characters.",
+                )
         try:
-            input_image = extract_continuation_frame(
+            continuation_frame = extract_continuation_frame(
                 job_id, 0, parent["output_path"]
             )
+            if request.engine == "animate2":
+                # Animate 2 keeps animating the same character reference; the
+                # final frame is passed separately as continue_motion.
+                input_image = parent["input_image"]
+                reference_front = parent["reference_front"]
+                reference_side = parent["reference_side"]
+                reference_back = parent["reference_back"]
+            else:
+                input_image = continuation_frame
         except Exception as error:
             shutil.rmtree(
                 OUTPUT_ROOT / "jobs" / job_id, ignore_errors=True
@@ -2308,9 +2470,9 @@ def create_job(request: JobCreate) -> dict[str, Any]:
                     request.engine,
                     request.concept,
                     input_image,
-                    request.reference_front or "",
-                    request.reference_side or "",
-                    request.reference_back or "",
+                    reference_front,
+                    reference_side,
+                    reference_back,
                     request.driving_video or "",
                     request.shots,
                     request.seed,
