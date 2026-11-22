@@ -1978,6 +1978,24 @@ class JobCreate(BaseModel):
     )
     ltx_license_acknowledged: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def blank_files_to_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            for key in (
+                "input_image",
+                "garment_image",
+                "reference_front",
+                "reference_side",
+                "reference_back",
+                "driving_video",
+                "continuation_of",
+            ):
+                if isinstance(data.get(key), str) and not data[key].strip():
+                    data[key] = None
+        return data
+
     @model_validator(mode="after")
     def validate_ltx(self) -> "JobCreate":
         prompt_optional = self.engine == "outfit" or (

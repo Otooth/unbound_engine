@@ -1039,3 +1039,14 @@ Wan 14B で動画化する。
 | animate2・動作元なし・指示文空 / wan14・指示文空 | 422 | 422 / 422 ✅ |
 | 服装変更画像 + `drive_doll_street_dance.mp4`（1.5秒から）、指示文空で animate2。Job `42db484e-…` | Qwen を使わず固定プロンプトでトレース | 337秒で成功。`Tracing the motion video without a prompt`、Qwen 工程なし。結果0/1/2秒が元動画1.5/2.5/3.5秒の姿勢と一致し、指示文ありの結果（Job `e691e2f8-…`）と同等 ✅ |
 | ブラウザーで Animate 2 を選択 → MP4 を指定 → Wan 5B に戻す | 必須 → 任意 → 必須 | `required` true → false（「場面や雰囲気の補足（任意）」）→ true ✅ |
+
+## 2026-11-23 側面・背面画像が未選択のとき Animate 2 が 422 になる不具合
+
+- 症状: UI から Wan Animate 2 を実行すると `String should match pattern '^[A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp)$'`。
+- 原因: 側面・背面画像が未選択のとき、UI が `null` ではなく空文字 `""` を送り、ファイル名パターンで拒否されていた（初期スナップショット `936987e` からの既存不具合）。
+- 修正: API で空文字のファイル名を未指定（None）として扱う `mode="before"` バリデータを追加。UI も未選択時は `null` を送る。
+
+| 実行コマンド | 期待結果 | 実際の結果 |
+|---|---|---|
+| 修正前: `reference_side: ""` / `garment_image: ""` で `POST /jobs` | 再現 | 両方ともパターン違反の 422 ✅（再現） |
+| 修正後: `reference_side: ""`, `reference_back: ""` で `POST /jobs`（存在しない動作元を指定） | 受付後、動作元なしで失敗 | `queued` → `Driving video does not exist`、`reference_side` は `''` で保存 ✅。テストジョブは削除 |
